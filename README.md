@@ -30,8 +30,11 @@
 ## 快速開始
 
 ```bash
-ADMIN_PASSWORD=你的密碼 npm start
+cp .env.example .env   # 編輯 .env，填入後台密碼
+npm start
 ```
+
+`.env` 已列在 `.gitignore`，密碼不會被上傳到 GitHub。也可以直接用環境變數：`ADMIN_PASSWORD=你的密碼 npm start`。
 
 - 學生頁面：http://localhost:3000
 - 老師後台：http://localhost:3000/admin
@@ -42,7 +45,7 @@ ADMIN_PASSWORD=你的密碼 npm start
 
 | 變數 | 預設 | 說明 |
 | --- | --- | --- |
-| `ADMIN_PASSWORD` | `admin1234` | 後台密碼，**正式使用務必修改** |
+| `ADMIN_PASSWORD` | （無） | 後台密碼，**必填**；沒設定時後台無法登入 |
 | `SCHOOL_NAME` | `花郎武道館` | 顯示在頁面上方的名稱 |
 | `SCHOOL_ADDRESS` | `台北市忠孝東路一段176號2樓之1` | 地址 |
 | `SCHOOL_ADDRESS_NOTE` | `近善導寺捷運站 5 號出口` | 交通說明 |
@@ -71,7 +74,7 @@ docker run -d -p 3000:3000 -v booking-data:/data \
 
 ## 第一次使用
 
-1. 設定 `ADMIN_PASSWORD` 啟動，進入 `/admin`
+1. 在 `.env` 設定 `ADMIN_PASSWORD` 後啟動，進入 `/admin`
 2. 到「學員資料」→「批次匯入」，從試算表貼上「姓名、信箱、電話」
 3. 到「固定課表」確認每堂課的名額
 4. 把網址傳給學員，請他們用登記的信箱登入

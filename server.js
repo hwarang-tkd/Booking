@@ -7,6 +7,10 @@ const { openDb, createStore } = require('./lib/db');
 const { CATEGORIES, CATEGORY_IDS, DEFAULT_TEMPLATES } = require('./lib/schedule');
 const T = require('./lib/time');
 
+// 自動讀取專案資料夾中的 .env（不會被上傳到 git）
+const ENV_FILE = path.join(__dirname, '.env');
+if (require.main === module && fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE);
+
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PAGES = { '/': '/index.html', '/my': '/my.html', '/info': '/info.html', '/admin': '/admin.html' };
 const MIME = {
@@ -20,7 +24,7 @@ function loadConfig(env = process.env) {
   return {
     port: num(env.PORT, 3000),
     dbPath: env.DB_PATH || path.join(__dirname, 'data', 'booking.db'),
-    adminPassword: env.ADMIN_PASSWORD || 'admin1234',
+    adminPassword: env.ADMIN_PASSWORD || '',
     timeZone: env.TIMEZONE || 'Asia/Taipei',
     schoolName: env.SCHOOL_NAME || '花郎武道館',
     address: env.SCHOOL_ADDRESS ?? '台北市忠孝東路一段176號2樓之1',
@@ -241,6 +245,7 @@ function createApp(cfg) {
   // ---------- 老師後台 API ----------
   route('POST', /^\/api\/admin\/login$/, (req, url, body) => {
     checkThrottle(req);
+    if (!cfg.adminPassword) throw new HttpError(503, '尚未設定後台密碼（ADMIN_PASSWORD），後台暫時無法登入');
     const a = crypto.createHash('sha256').update(String(body.password ?? '')).digest();
     const b = crypto.createHash('sha256').update(cfg.adminPassword).digest();
     if (!crypto.timingSafeEqual(a, b)) { recordFail(req, 5); throw new HttpError(401, '密碼錯誤'); }
@@ -496,8 +501,8 @@ function createApp(cfg) {
 
 if (require.main === module) {
   const cfg = loadConfig();
-  if (!process.env.ADMIN_PASSWORD) {
-    console.warn('⚠️  尚未設定 ADMIN_PASSWORD，目前後台密碼為預設值 admin1234，正式使用前請務必修改！');
+  if (!cfg.adminPassword) {
+    console.warn('⚠️  尚未設定 ADMIN_PASSWORD，後台無法登入。請在 .env 檔或環境變數中設定。');
   }
   createApp(cfg).listen(cfg.port, () => {
     console.log(`✅ ${cfg.schoolName} 約課系統已啟動：http://localhost:${cfg.port}`);
