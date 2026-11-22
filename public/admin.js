@@ -14,12 +14,17 @@
     <div class="stack">
       <div class="row">
         <label class="field">課程名稱 <input type="text" name="title" maxlength="60" required placeholder="例如：跆拳道"></label>
-        <label class="field">分類（顏色）
-          <select name="category">${cfg.categories.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
-        </label>
+        <label class="field">英文名稱 <span class="hint">（選填，英文介面顯示）</span>
+          <input type="text" name="titleEn" maxlength="80" placeholder="Taekwon-Do"></label>
       </div>
-      <label class="field">副標題 <span class="hint">（選填，例如英文名稱、年齡）</span>
-        <input type="text" name="subtitle" maxlength="80" placeholder="Taekwon-Do・12歲以上">
+      <div class="row">
+        <label class="field">副標題 <span class="hint">（選填，例如年齡、程度）</span>
+          <input type="text" name="subtitle" maxlength="80" placeholder="12歲以上"></label>
+        <label class="field">英文副標題 <span class="hint">（選填，英文介面顯示）</span>
+          <input type="text" name="subtitleEn" maxlength="80" placeholder="Age 12+"></label>
+      </div>
+      <label class="field">分類（顏色）
+        <select name="category">${cfg.categories.map((c) => `<option value="${c.id}">${esc(catName(c.id))}</option>`).join('')}</select>
       </label>
       <div class="row">
         <label class="field">課程長度（分鐘）<input type="number" name="duration" min="5" max="600" value="90" required></label>
@@ -32,10 +37,12 @@
   document.querySelectorAll('[data-fields]').forEach((el) => { el.innerHTML = fieldsHtml; });
   const readFields = (f) => ({
     title: f.title.value, subtitle: f.subtitle.value, category: f.category.value,
+    titleEn: f.titleEn.value, subtitleEn: f.subtitleEn.value,
     duration: Number(f.duration.value), capacity: Number(f.capacity.value), note: f.note.value,
   });
   const fillFields = (f, s) => {
     f.title.value = s.title; f.subtitle.value = s.subtitle || ''; f.category.value = s.category || 'other';
+    f.titleEn.value = s.titleEn || ''; f.subtitleEn.value = s.subtitleEn || '';
     f.duration.value = s.durationMin; f.capacity.value = s.capacity; f.note.value = s.note || '';
   };
 
@@ -144,8 +151,8 @@
     el.innerHTML = `
       <div class="head">
         <div class="info">
-          <div class="when">${s.startAt.slice(11)}–${endTime(s.startAt, s.durationMin)}　${esc(s.title)}</div>
-          ${s.subtitle ? `<div class="muted" style="font-size:.85rem">${esc(s.subtitle)}</div>` : ''}
+          <div class="when">${s.startAt.slice(11)}–${endTime(s.startAt, s.durationMin)}　${esc(ctitle(s))}</div>
+          ${csub(s) ? `<div class="muted" style="font-size:.85rem">${esc(csub(s))}</div>` : ''}
           ${s.cancelled ? '' : `<div class="bar ${full ? 'full' : ''}"><i style="width:${Math.min(100, (s.booked / s.capacity) * 100)}%"></i></div>`}
         </div>
         ${s.cancelled ? '<span class="badge danger">停課</span>'
@@ -196,7 +203,7 @@
     act('edit', () => openEdit(s));
     act('add', () => openAdd(s));
     act('stop', async () => {
-      const msg = `確定 ${fmtSlot(s)}「${s.title}」停課？` +
+      const msg = `確定 ${fmtSlot(s)}「${ctitle(s)}」停課？` +
         (active.length ? `\n\n已有 ${active.length} 位學生預約，系統不會自動通知，請記得聯絡他們（點「名單」可看到電話）。` : '');
       if (!confirm(msg)) return;
       try { await call(`/api/admin/slots/${s.id}/cancel`, { method: 'POST' }); toast('已設為停課'); if (active.length) openRosters.add(s.id); loadSchedule(); }
@@ -208,8 +215,8 @@
     });
     act('del', async () => {
       const msg = active.length
-        ? `「${s.title}」已有 ${active.length} 位學生預約，刪除後預約也會一併消失（學生不會收到通知）。確定刪除？`
-        : `確定刪除 ${fmtSlot(s)} 的「${s.title}」？`;
+        ? `「${ctitle(s)}」已有 ${active.length} 位學生預約，刪除後預約也會一併消失（學生不會收到通知）。確定刪除？`
+        : `確定刪除 ${fmtSlot(s)} 的「${ctitle(s)}」？`;
       if (!confirm(msg)) return;
       try { await call(`/api/admin/slots/${s.id}`, { method: 'DELETE' }); toast('已刪除課程'); loadSchedule(); }
       catch (e) { fail(e); }
@@ -252,7 +259,7 @@
     if (!students.length) await loadStudents(true);
     $('studentOptions').innerHTML = students.filter((x) => x.active)
       .map((x) => `<option value="${esc(x.email)}">${esc(x.name)}</option>`).join('');
-    $('addSummary').innerHTML = `<b>${esc(s.title)}</b><br>${fmtSlot(s)}　目前 ${s.booked}/${s.capacity}`;
+    $('addSummary').innerHTML = `<b>${esc(ctitle(s))}</b><br>${fmtSlot(s)}　目前 ${s.booked}/${s.capacity}`;
     $('addErr').classList.add('hidden');
     $('addDlg').showModal();
   }
@@ -442,7 +449,7 @@
       $('histBody').innerHTML = bookings.length ? `<div class="roster" style="border:none;margin:0;padding:0"><table><tbody>${bookings.map((b) => `
         <tr class="${b.status}">
           <td><span class="tag" style="${catStyle(b.category)}">&nbsp;</span></td>
-          <td>${fmtDate(b.startAt.slice(0, 10))} ${b.startAt.slice(11)}<br><b>${esc(b.title)}</b></td>
+          <td>${fmtDate(b.startAt.slice(0, 10))} ${b.startAt.slice(11)}<br><b>${esc(ctitle(b))}</b></td>
           <td>${b.status === 'cancelled' ? '<span class="badge">已取消</span>' : b.slotCancelled ? '<span class="badge danger">停課</span>'
             : b.past ? '<span class="badge">已上課</span>' : '<span class="badge ok">已預約</span>'}
             ${b.trial ? '<span class="badge warn">體驗</span>' : ''}
@@ -476,7 +483,7 @@
   let passStudent = null, editingPass = null;
 
   $('passCats').innerHTML = cfg.categories.filter((c) => c.id !== 'other').map((c) =>
-    `<label style="width:auto;padding:0 10px;font-size:.85rem;gap:6px"><input type="checkbox" value="${c.id}"><i style="width:10px;height:10px;border-radius:50%;background:${catColor(c.id)}"></i>${esc(c.name)}</label>`).join('');
+    `<label style="width:auto;padding:0 10px;font-size:.85rem;gap:6px"><input type="checkbox" value="${c.id}"><i style="width:10px;height:10px;border-radius:50%;background:${catColor(c.id)}"></i>${esc(catName(c.id))}</label>`).join('');
   $('presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-preset="${i}">${esc(p.label)}</button>`).join('');
   $('presets').querySelectorAll('[data-preset]').forEach((b) => b.onclick = () => {
     const p = PRESETS[b.dataset.preset], f = $('passForm');
@@ -621,15 +628,15 @@
           el.innerHTML = `
             <div class="head">
               <div class="info">
-                <div class="when">${t.time}–${endTime('2000-01-01T' + t.time, t.durationMin)}　${esc(t.title)}</div>
-                <div class="muted" style="font-size:.85rem">${esc(t.subtitle)}${t.subtitle ? '・' : ''}名額 ${t.capacity}</div>
+                <div class="when">${t.time}–${endTime('2000-01-01T' + t.time, t.durationMin)}　${esc(ctitle(t))}</div>
+                <div class="muted" style="font-size:.85rem">${esc(csub(t))}${csub(t) ? '・' : ''}名額 ${t.capacity}</div>
               </div>
               <button class="btn secondary small" data-act="edit">編輯</button>
               <button class="btn danger small" data-act="del">刪除</button>
             </div>`;
           el.querySelector('[data-act="edit"]').onclick = () => openTpl(t);
           el.querySelector('[data-act="del"]').onclick = async () => {
-            if (!confirm(`從固定課表刪除「禮拜${DOW[t.weekday]} ${t.time} ${t.title}」？\n\n之後還沒有人預約的課會一起移除；已有學生預約的課會保留，需要的話可以再個別停課。`)) return;
+            if (!confirm(`從固定課表刪除「禮拜${DOW[t.weekday]} ${t.time} ${ctitle(t)}」？\n\n之後還沒有人預約的課會一起移除；已有學生預約的課會保留，需要的話可以再個別停課。`)) return;
             try {
               const r = await call(`/api/admin/templates/${t.id}`, { method: 'DELETE' });
               toast(r.kept ? `已刪除，保留 ${r.kept} 堂已有人預約的課` : '已刪除'); loadTemplates();

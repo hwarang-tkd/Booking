@@ -34,6 +34,8 @@ describe('預設課表', () => {
   test('全新資料庫會載入花郎武道館課表，並自動開放 4 週課程', async () => {
     const { data } = await app.req('/api/templates');
     assert.equal(data.templates.length, DEFAULT_TEMPLATES.length);
+    assert.equal(data.templates[0].titleEn, 'Taekwon-Do');
+    assert.equal(data.templates[0].subtitleEn, 'Age 12+');
     const s = await app.req('/api/slots?days=29');
     // 28 天 = 剛好 4 週，加上今天可能多一天；每週 16 堂
     assert.ok(s.data.slots.length >= 4 * 16 - 16 && s.data.slots.length <= 5 * 16, String(s.data.slots.length));
@@ -381,6 +383,27 @@ test('舊版資料庫（預約代碼）可以升級', () => {
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bookings_legacy').get().n, 1);
   const sid = st.createStudent({ name: 'a', email: 'a@b.co', phone: '', note: '' });
   assert.ok(st.book({ slotId: 1, studentId: sid, note: '', isOpen: () => true }).booking);
+  db.close();
+});
+
+test('舊版課程副標題升級成英文課名', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const { openDb } = require('../lib/db');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bk-')), 'old2.db');
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE templates (id INTEGER PRIMARY KEY, title TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL DEFAULT 'other', weekday INTEGER NOT NULL, time TEXT NOT NULL, duration_min INTEGER NOT NULL,
+      capacity INTEGER NOT NULL, note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    INSERT INTO templates (title, subtitle, weekday, time, duration_min, capacity) VALUES
+      ('跆拳道', 'Taekwon-Do・12歲以上', 1, '10:30', 90, 20), ('私人', 'Private Session', 5, '12:30', 60, 1), ('自訂', '中文副標', 2, '10:00', 60, 5);`);
+  old.close();
+  const db = openDb(file);
+  const rows = db.prepare('SELECT title_en, subtitle, subtitle_en FROM templates ORDER BY id').all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [
+    { title_en: 'Taekwon-Do', subtitle: '12歲以上', subtitle_en: 'Age 12+' },
+    { title_en: 'Private Session', subtitle: '', subtitle_en: '' },
+    { title_en: '', subtitle: '中文副標', subtitle_en: '' },
+  ]);
   db.close();
 });
 

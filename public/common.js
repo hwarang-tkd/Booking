@@ -1,5 +1,5 @@
 // 共用工具：API 呼叫、日期格式化、小工具
-const DOW = ['日', '一', '二', '三', '四', '五', '六'];
+const DOW = isEn ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] : ['日', '一', '二', '三', '四', '五', '六'];
 
 async function api(path, { method = 'GET', body, token } = {}) {
   const headers = {};
@@ -25,6 +25,7 @@ function addDays(dateStr, n) {
 function dow(dateStr) { return new Date(toMs(dateStr + 'T00:00')).getUTCDay(); }
 function fmtDate(dateStr) {
   const [, m, d] = dateStr.split('-');
+  if (isEn) return `${DOW[dow(dateStr)]} ${Number(m)}/${Number(d)}`;
   return `${Number(m)}/${Number(d)}（${DOW[dow(dateStr)]}）`;
 }
 function endTime(startAt, durationMin) {
@@ -60,19 +61,30 @@ function showError(el, msg) {
 // 課程分類顏色
 let CATS = {};
 const catColor = (id) => (CATS[id] || CATS.other || {}).color || '#ddd';
-const catName = (id) => (CATS[id] || {}).name || '';
+const catName = (id) => (isEn && (CATS[id] || {}).nameEn) || (CATS[id] || {}).name || '';
+// 課程名稱與副標題：中文介面「跆拳道」＋「Taekwon-Do・12歲以上」；英文介面「Taekwon-Do」＋「Age 12+」
+const ctitle = (s) => (isEn && s.titleEn) || s.title;
+const csub = (s) => (isEn
+  ? (s.titleEn ? s.subtitleEn || '' : [s.subtitleEn || s.subtitle].filter(Boolean).join(''))
+  : [s.titleEn, s.subtitle].filter(Boolean).join('・'));
 const catStyle = (id) => `--cat:${catColor(id)}`;
 
 async function applyConfig() {
   const cfg = await api('/api/config');
   CATS = Object.fromEntries(cfg.categories.map((c) => [c.id, c]));
+  if (isEn) {
+    cfg.schoolNameZh = cfg.schoolName;
+    cfg.schoolName = cfg.schoolNameEn || cfg.schoolName;
+    cfg.address = cfg.addressEn || cfg.address;
+    cfg.addressNote = cfg.addressNoteEn || cfg.addressNote;
+  }
   document.querySelectorAll('[data-school]').forEach((el) => { el.textContent = cfg.schoolName; });
   const foot = document.querySelector('footer.site');
   if (foot && cfg.address) {
     foot.innerHTML = `${esc(cfg.schoolName)}・${esc(cfg.address)}${cfg.addressNote ? `<br>${esc(cfg.addressNote)}` : ''}` +
       (cfg.facebookUrl ? `<br><a href="${esc(cfg.facebookUrl)}" target="_blank" rel="noopener">Facebook 粉絲專頁</a>` : '');
   }
-  document.title = `${document.title}｜${cfg.schoolName}`;
+  document.title = `${tr(document.title)}｜${cfg.schoolName}`;
   return cfg;
 }
 

@@ -68,6 +68,7 @@
 
   <footer class="site"></footer>
 
+  <script src="/i18n.js"></script>
   <script src="/common.js"></script>
   <script>
     (async () => {
@@ -82,7 +83,7 @@
           const items = templates.filter((t) => t.weekday === d);
           col.innerHTML = `<h3>禮拜${DOW[d]}</h3>` + (items.length ? items.map((t) => `
             <div class="cls" style="${catStyle(t.category)}">
-              <div><b>${esc(t.title)}</b>${t.subtitle ? `<span class="st">${t.subtitle.split('・').map(esc).join('<i>・</i><br>')}</span>` : ''}</div>
+              <div><b>${esc(ctitle(t))}</b>${csub(t) ? `<span class="st">${csub(t).split('・').map(esc).join('<i>・</i><br>')}</span>` : ''}</div>
               <div class="t">${t.time}–${endTime('2000-01-01T' + t.time, t.durationMin)}</div>
             </div>`).join('') : '<div class="none">可供出租</div>');
           box.appendChild(col);

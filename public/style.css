@@ -278,3 +278,14 @@ footer.site {
 .price th { background: var(--surface-2); font-weight: 700; }
 .price td b { font-size: 1.1rem; }
 .callout { background: var(--surface-2); border-left: 4px solid var(--brand); padding: 10px 14px; border-radius: 8px; font-size: .95rem; }
+
+/* ---------- 語言切換 ---------- */
+.lang-switch {
+  border: 1.5px solid currentColor; background: transparent; color: inherit; border-radius: 999px;
+  padding: 3px 10px; font-size: .85rem; font-weight: 700; cursor: pointer; line-height: 1.4; min-width: 46px;
+}
+.lang-switch:hover { background: rgba(0, 0, 0, .08); }
+@media (max-width: 480px) {
+  .lang-switch { position: absolute; top: 18px; right: 12px; }
+  .topbar-inner { position: relative; }
+}

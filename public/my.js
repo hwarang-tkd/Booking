@@ -96,8 +96,8 @@
     el.innerHTML = `
       <div class="time"><b>${b.startAt.slice(11)}</b><small>${fmtDate(b.startAt.slice(0, 10))}</small></div>
       <div class="info">
-        <div class="title" ${cancelled ? 'style="text-decoration:line-through;opacity:.6"' : ''}>${esc(b.title)}</div>
-        ${b.subtitle ? `<div class="subtitle">${esc(b.subtitle)}</div>` : ''}
+        <div class="title" ${cancelled ? 'style="text-decoration:line-through;opacity:.6"' : ''}>${esc(ctitle(b))}</div>
+        ${csub(b) ? `<div class="subtitle">${esc(csub(b))}</div>` : ''}
         <div class="meta">${badge}${b.trial ? '<span class="badge warn">體驗課</span>' : ''}
           ${b.passName && !cancelled && !b.slotCancelled ? `<span class="muted" style="font-size:.82rem">🎫 ${esc(b.passName)}</span>` : ''}
           ${!cancelled && !b.past && !b.slotCancelled && !b.cancellable
@@ -106,7 +106,7 @@
       </div>
       ${b.cancellable ? '<div class="actions"><button class="btn danger small">取消預約</button></div>' : ''}`;
     el.querySelector('button')?.addEventListener('click', async (ev) => {
-      if (!confirm(`確定取消 ${fmtSlot(b)}「${b.title}」？`)) return;
+      if (!confirm(`確定取消 ${fmtSlot(b)}「${ctitle(b)}」？`)) return;
       ev.target.disabled = true;
       try {
         await sapi(`/api/my/bookings/${b.id}/cancel`, { method: 'POST' });

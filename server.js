@@ -27,6 +27,9 @@ function loadConfig(env = process.env) {
     adminPassword: env.ADMIN_PASSWORD || '',
     timeZone: env.TIMEZONE || 'Asia/Taipei',
     schoolName: env.SCHOOL_NAME || '花郎武道館',
+    schoolNameEn: env.SCHOOL_NAME_EN || 'Hwarang Martial Arts',
+    addressEn: env.SCHOOL_ADDRESS_EN ?? '2F-1, No. 176, Sec. 1, Zhongxiao E. Rd., Taipei',
+    addressNoteEn: env.SCHOOL_ADDRESS_NOTE_EN ?? 'Near Shandao Temple MRT Station, Exit 5',
     address: env.SCHOOL_ADDRESS ?? '台北市忠孝東路一段176號2樓之1',
     addressNote: env.SCHOOL_ADDRESS_NOTE ?? '近善導寺捷運站 5 號出口',
     facebookUrl: env.FACEBOOK_URL || '',
@@ -107,12 +110,14 @@ function createApp(cfg) {
   const resetGenerated = () => { generated = { day: '', until: '' }; };
 
   const publicSlot = (s) => ({
-    id: s.id, title: s.title, subtitle: s.subtitle, category: s.category, startAt: s.start_at,
+    id: s.id, title: s.title, subtitle: s.subtitle, titleEn: s.title_en, subtitleEn: s.subtitle_en,
+    category: s.category, startAt: s.start_at,
     durationMin: s.duration_min, capacity: s.capacity, booked: s.booked,
     remaining: Math.max(0, s.capacity - s.booked), note: s.note, open: isOpen(s),
   });
   const publicTemplate = (t) => ({
-    id: t.id, title: t.title, subtitle: t.subtitle, category: t.category, weekday: t.weekday, time: t.time,
+    id: t.id, title: t.title, subtitle: t.subtitle, titleEn: t.title_en, subtitleEn: t.subtitle_en,
+    category: t.category, weekday: t.weekday, time: t.time,
     durationMin: t.duration_min, capacity: t.capacity, note: t.note,
   });
 
@@ -120,6 +125,8 @@ function createApp(cfg) {
     return {
       title: str(b.title, 60, '課程名稱'),
       subtitle: str(b.subtitle, 80, '副標題', { required: false }),
+      titleEn: str(b.titleEn, 80, '英文名稱', { required: false }),
+      subtitleEn: str(b.subtitleEn, 80, '英文副標題', { required: false }),
       category: category(b.category),
       duration: int(b.duration, 5, 600, '課程長度（分鐘）'),
       capacity: int(b.capacity, 1, 500, '名額'),
@@ -199,6 +206,7 @@ function createApp(cfg) {
   // ---------- 公開 API ----------
   route('GET', /^\/api\/config$/, () => ({
     schoolName: cfg.schoolName, address: cfg.address, addressNote: cfg.addressNote, facebookUrl: cfg.facebookUrl,
+    schoolNameEn: cfg.schoolNameEn, addressEn: cfg.addressEn, addressNoteEn: cfg.addressNoteEn,
     cancelHours: cfg.cancelHours, bookAheadDays: cfg.bookAheadDays, timeZone: cfg.timeZone, now: now(),
     categories: CATEGORIES,
   }));
@@ -276,6 +284,7 @@ function createApp(cfg) {
       student: publicStudent(me),
       bookings: store.studentBookings(me.id, since).map((b) => ({
         id: b.id, status: b.status, trial: !!b.trial, note: b.note, passName: b.pass_name, title: b.title, subtitle: b.subtitle,
+        titleEn: b.title_en, subtitleEn: b.subtitle_en,
         category: b.category, startAt: b.start_at, durationMin: b.duration_min, past: b.start_at <= now(),
         slotCancelled: !!b.slot_cancelled, cancellable: b.status === 'active' && !b.slot_cancelled && canCancel(b),
       })),

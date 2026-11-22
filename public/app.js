@@ -42,7 +42,7 @@
       const b = document.createElement('button');
       b.type = 'button';
       b.setAttribute('aria-pressed', String(filter === c.id));
-      b.innerHTML = (c.id === 'all' ? '' : `<i style="${catStyle(c.id)}"></i>`) + esc(c.name);
+      b.innerHTML = (c.id === 'all' ? '' : `<i style="${catStyle(c.id)}"></i>`) + esc(c.id === 'all' ? c.name : catName(c.id));
       b.onclick = () => { filter = c.id; applyFilter(); selected = null; renderFilters(); renderDates(); renderList(); };
       el.appendChild(b);
     }
@@ -93,8 +93,8 @@
       card.innerHTML = `
         <div class="time"><b>${s.startAt.slice(11)}</b><small>至 ${endTime(s.startAt, s.durationMin)}</small></div>
         <div class="info">
-          <div class="title">${esc(s.title)}</div>
-          ${s.subtitle ? `<div class="subtitle">${esc(s.subtitle)}</div>` : ''}
+          <div class="title">${esc(ctitle(s))}</div>
+          ${csub(s) ? `<div class="subtitle">${esc(csub(s))}</div>` : ''}
           ${s.note ? `<div class="note">${esc(s.note)}</div>` : ''}
           <div class="meta">
             ${s.mine ? '<span class="badge ok">✓ 你已預約</span>'
@@ -130,7 +130,7 @@
     const passBox = $('bookPass'), btn = $('bookBtn');
     passBox.textContent = '確認堂數中…';
     btn.disabled = true;
-    $('bookSummary').innerHTML = `<b>${esc(s.title)}</b>${s.subtitle ? `　<span class="muted">${esc(s.subtitle)}</span>` : ''}<br>${fmtSlot(s)}`;
+    $('bookSummary').innerHTML = `<b>${esc(ctitle(s))}</b>${csub(s) ? `　<span class="muted">${esc(csub(s))}</span>` : ''}<br>${fmtSlot(s)}`;
     $('bookDlg').showModal();
     try {
       const { pass, required } = await sapi(`/api/bookings/preview?slotId=${s.id}`);
@@ -165,7 +165,7 @@
     try {
       const r = await sapi('/api/bookings', { method: 'POST', body: { slotId: booking.id, note: f.note.value } });
       $('bookDlg').close();
-      toast(`✅ 已預約 ${fmtSlot(r.slot)}「${r.slot.title}」` + (r.pass ? `，「${r.pass.name}」剩 ${r.pass.remaining} 堂` : ''));
+      toast(`✅ 已預約 ${fmtSlot(r.slot)}「${ctitle(r.slot)}」` + (r.pass ? `，「${r.pass.name}」剩 ${r.pass.remaining} 堂` : ''));
       load();
     } catch (e) {
       if (e.status === 401) { $('bookDlg').close(); openBooking(booking); return; }
