@@ -60,6 +60,8 @@ npm start
 
 ## 部署
 
+**花郎武道館的正式上線步驟（Railway + WordPress.com 網域）請看 [DEPLOY.md](DEPLOY.md)。**
+
 任何能跑 Node.js 且有**永久儲存空間**的主機都可以（VPS、Railway、Render 加 Disk、Fly.io 加 Volume、家裡的 NAS）。
 
 使用 Docker：
