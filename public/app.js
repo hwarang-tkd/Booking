@@ -84,8 +84,13 @@
       return;
     }
     list.innerHTML = '';
+    const family = auth.token ? auth.students : [];
     for (const s of day) {
       const full = s.remaining <= 0;
+      // 家庭帳號：全部成員都約了才算「已預約」，否則還能幫其他人約
+      const ids = s.mineIds || [];
+      const allBooked = s.mine && ids.length >= Math.max(1, family.length);
+      const who = family.length > 1 ? ids.map((id) => auth.nameOf(id)).filter(Boolean).join('、') : '';
       const pct = Math.min(100, Math.round((s.booked / s.capacity) * 100));
       const card = document.createElement('div');
       card.className = 'card slot cat';
@@ -97,7 +102,8 @@
           ${csub(s) ? `<div class="subtitle">${esc(csub(s))}</div>` : ''}
           ${s.note ? `<div class="note">${esc(s.note)}</div>` : ''}
           <div class="meta">
-            ${s.mine ? '<span class="badge ok">✓ 你已預約</span>'
+            ${s.mine ? (who ? `<span class="badge ok">✓ ${esc(who)} 已預約</span>` : '<span class="badge ok">✓ 你已預約</span>') : ''}
+            ${allBooked ? ''
               : full ? '<span class="badge danger">已額滿</span>'
               : s.remaining <= 2 ? `<span class="badge warn">剩 ${s.remaining} 位</span>`
               : `<span class="badge ok">剩 ${s.remaining} 位</span>`}
@@ -105,7 +111,7 @@
           </div>
           <div class="bar ${full ? 'full' : ''}"><i style="width:${pct}%"></i></div>
         </div>
-        <div class="actions">${s.mine
+        <div class="actions">${allBooked
           ? '<a class="btn secondary" href="/my">查看預約</a>'
           : `<button class="btn" ${full ? 'disabled' : ''}>${full ? '額滿' : '預約'}</button>`}</div>`;
       const btn = card.querySelector('button');
@@ -120,25 +126,56 @@
       if (!st) return;
       await load(); // 重新載入，標示自己已預約的課
       s = all.find((x) => x.id === s.id) || s;
-      if (s.mine) { toast('你已經預約過這堂課了'); return; }
     }
+    // 還沒約這堂課的家庭成員
+    const family = auth.students;
+    const free = family.filter((x) => !(s.mineIds || []).includes(x.id));
+    if (!free.length) { toast('你已經預約過這堂課了'); renderList(); return; }
     booking = s;
     const f = $('bookForm');
     f.note.value = '';
     $('bookErr').classList.add('hidden');
-    $('bookWho').textContent = auth.student.name;
+    const box = $('bookWhoBox');
+    if (family.length === 1) {
+      box.innerHTML = `<p style="margin:0">學員：<b>${esc(free[0].name)}</b>
+        <a href="#" id="switchUser" style="font-size:.88rem;margin-left:6px">不是你？</a></p>`;
+    } else {
+      box.innerHTML = `<div class="field" style="margin-bottom:6px">幫誰預約？</div>
+        <div class="weekdays who">${family.map((x) => {
+          const done = !free.some((y) => y.id === x.id);
+          return `<label style="width:auto;padding:0 14px${done ? ';opacity:.5' : ''}"><input type="radio" name="who" value="${x.id}"
+            ${done ? 'disabled' : ''}${x.id === free[0].id ? ' checked' : ''}>${esc(x.name)}${done ? '（已預約）' : ''}</label>`;
+        }).join('')}</div>
+        <a href="#" id="switchUser" style="font-size:.85rem;display:inline-block;margin-top:6px">換別的信箱登入</a>`;
+      box.querySelectorAll('input[name=who]').forEach((r) => r.addEventListener('change', () => previewFor(s)));
+    }
+    $('switchUser').onclick = switchUser;
+    $('bookSummary').innerHTML = `<b>${esc(ctitle(s))}</b>${csub(s) ? `　<span class="muted">${esc(csub(s))}</span>` : ''}<br>${fmtSlot(s)}`;
+    $('bookDlg').showModal();
+    await previewFor(s);
+  }
+
+  const selectedStudent = () => {
+    const r = document.querySelector('#bookWhoBox input[name=who]:checked');
+    return r ? Number(r.value) : (auth.students.length === 1 ? auth.students[0].id : null);
+  };
+
+  /** 顯示選定學員約這堂課會扣哪張卡。 */
+  async function previewFor(s) {
     const passBox = $('bookPass'), btn = $('bookBtn');
     passBox.textContent = '確認堂數中…';
     btn.disabled = true;
-    $('bookSummary').innerHTML = `<b>${esc(ctitle(s))}</b>${csub(s) ? `　<span class="muted">${esc(csub(s))}</span>` : ''}<br>${fmtSlot(s)}`;
-    $('bookDlg').showModal();
+    const sid = selectedStudent();
+    const many = auth.students.length > 1;
     try {
-      const { pass, required } = await sapi(`/api/bookings/preview?slotId=${s.id}`);
+      const { pass, required } = await sapi(`/api/bookings/preview?slotId=${s.id}&studentId=${sid}`);
       if (pass) {
         passBox.innerHTML = `🎫 將使用「<b>${esc(pass.name)}</b>」，預約後剩 <b>${pass.remaining - 1}</b> 堂（${fmtDate(pass.endDate)} 到期）`;
         btn.disabled = false;
       } else if (required) {
-        passBox.innerHTML = '⚠️ 你目前<b>沒有可用的堂數</b>（可能已用完、已過期，或方案不包含這類課程），請聯絡老師購買或續約。';
+        passBox.innerHTML = many
+          ? `⚠️ ${esc(auth.nameOf(sid))} 目前<b>沒有可用的堂數</b>（可能已用完、已過期，或方案不包含這類課程），請聯絡老師購買或續約。`
+          : '⚠️ 你目前<b>沒有可用的堂數</b>（可能已用完、已過期，或方案不包含這類課程），請聯絡老師購買或續約。';
       } else {
         passBox.textContent = '這堂課不會扣堂數。';
         btn.disabled = false;
@@ -150,22 +187,23 @@
     if (!btn.disabled) btn.focus();
   }
 
-  $('switchUser').addEventListener('click', async (ev) => {
+  async function switchUser(ev) {
     ev.preventDefault();
     await sapi('/api/logout', { method: 'POST' }).catch(() => {});
     auth.clear();
     $('bookDlg').close();
     openBooking(booking);
-  });
+  }
 
   $('bookForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const f = ev.target, btn = $('bookBtn');
     btn.disabled = true; btn.textContent = '送出中…';
     try {
-      const r = await sapi('/api/bookings', { method: 'POST', body: { slotId: booking.id, note: f.note.value } });
+      const r = await sapi('/api/bookings', { method: 'POST', body: { slotId: booking.id, studentId: selectedStudent(), note: f.note.value } });
       $('bookDlg').close();
-      toast(`✅ 已預約 ${fmtSlot(r.slot)}「${ctitle(r.slot)}」` + (r.pass ? `，「${r.pass.name}」剩 ${r.pass.remaining} 堂` : ''));
+      toast(`✅ ${auth.students.length > 1 ? `已幫 ${r.student.name} 預約` : '已預約'} ${fmtSlot(r.slot)}「${ctitle(r.slot)}」`
+        + (r.pass ? `，「${r.pass.name}」剩 ${r.pass.remaining} 堂` : ''));
       load();
     } catch (e) {
       if (e.status === 401) { $('bookDlg').close(); openBooking(booking); return; }

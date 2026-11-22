@@ -87,7 +87,8 @@ describe('API', () => {
     const r = await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '小明', email: 'Ming@Example.com', phone: '0912-345-678' } });
     assert.equal(r.status, 201);
     ming = r.data.id;
-    assert.equal((await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '小明2', email: 'ming@example.com' } })).status, 409);
+    // 同信箱同名 → 重複；同信箱不同名（兄弟姊妹）在家庭帳號測試另外驗證
+    assert.equal((await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '小明', email: 'ming@example.com' } })).status, 409);
     assert.equal((await req('/api/admin/students', { method: 'POST', auth: token, body: { name: 'x', email: 'not-an-email' } })).status, 400);
     assert.equal((await req('/api/admin/students', { method: 'POST', body: { name: 'x', email: 'x@y.com' } })).status, 401);
 
@@ -96,8 +97,8 @@ describe('API', () => {
       { name: '小明', email: 'ming@example.com' },
     ] } });
     assert.equal(b.status, 201);
-    assert.deepEqual(b.data.created, ['hua@example.com', 'mei@example.com']);
-    assert.deepEqual(b.data.skipped, ['ming@example.com']);
+    assert.deepEqual(b.data.created, ['小華 <hua@example.com>', '小美 <mei@example.com>']);
+    assert.deepEqual(b.data.skipped, ['小明 <ming@example.com>']);
     const list = (await req('/api/admin/students', { auth: token })).data.students;
     assert.equal(list.length, 3);
     hua = list.find((x) => x.name === '小華').id;
@@ -108,9 +109,9 @@ describe('API', () => {
     assert.equal((await req('/api/login', { method: 'POST', body: { email: 'nobody@example.com' } })).status, 404);
     const r = await req('/api/login', { method: 'POST', body: { email: '  MING@example.com ' } });
     assert.equal(r.status, 200);
-    assert.equal(r.data.student.name, '小明');
+    assert.deepEqual(r.data.students.map((x) => x.name), ['小明']);
     mingToken = r.data.token;
-    assert.equal((await req('/api/me', { auth: mingToken })).data.student.email, 'ming@example.com');
+    assert.equal((await req('/api/me', { auth: mingToken })).data.students[0].email, 'ming@example.com');
     assert.equal((await req('/api/me')).status, 401);
     // 學員的登入不能進後台
     assert.equal((await req('/api/admin/students', { auth: mingToken })).status, 401);
@@ -229,7 +230,7 @@ describe('API', () => {
     const tmp = await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '路人', email: 'tmp@example.com' } });
     assert.equal((await req(`/api/admin/students/${tmp.data.id}`, { method: 'DELETE', auth: token })).status, 200);
     // 編輯學員信箱：不能和別人重複
-    assert.equal((await req(`/api/admin/students/${hua}`, { method: 'PUT', auth: token, body: { name: '小華', email: 'ming@example.com' } })).status, 409);
+    assert.equal((await req(`/api/admin/students/${hua}`, { method: 'PUT', auth: token, body: { name: '小明', email: 'ming@example.com' } })).status, 409);
     assert.equal((await req(`/api/admin/students/${hua}`, { method: 'PUT', auth: token, body: { name: '小華', email: 'hua2@example.com' } })).status, 200);
     assert.equal((await req('/api/login', { method: 'POST', body: { email: 'hua2@example.com' } })).status, 200);
 
@@ -328,6 +329,76 @@ describe('API', () => {
     assert.equal(me.credits.remaining, 0);
   });
 
+  test('同一個信箱多位學員（家庭帳號）', async () => {
+    const d = today();
+    const add = (name) => req('/api/admin/students', { method: 'POST', auth: token, body: { name, email: 'Family@Example.com' } });
+    const bro = (await add('哥哥')).data.id;
+    const sis = (await add('妹妹')).data.id;
+    assert.ok(bro && sis);
+    // 批次匯入：同信箱不同名會新增、同名略過
+    const imp = await req('/api/admin/students/batch', { method: 'POST', auth: token, body: { students: [
+      { name: '弟弟', email: 'family@example.com' }, { name: '妹妹', email: 'family@example.com' }] } });
+    assert.deepEqual(imp.data.created, ['弟弟 <family@example.com>']);
+    assert.deepEqual(imp.data.skipped, ['妹妹 <family@example.com>']);
+    const all = (await req('/api/admin/students', { auth: token })).data.students;
+    const kid = all.find((x) => x.name === '弟弟').id;
+    await req(`/api/admin/students/${kid}/deactivate`, { method: 'POST', auth: token });
+
+    // 登入列出啟用中的家庭成員
+    const lg = await req('/api/login', { method: 'POST', body: { email: 'family@example.com' } });
+    assert.equal(lg.status, 200);
+    assert.deepEqual(lg.data.students.map((x) => x.name), ['哥哥', '妹妹']);
+    const t = lg.data.token;
+
+    // 各自的堂數
+    const mk = (id, n) => req(`/api/admin/students/${id}/passes`, { method: 'POST', auth: token,
+      body: { name: `${n} 堂`, total: n, startDate: d, endDate: T.addDays(d, 20) } });
+    await mk(bro, 2); await mk(sis, 1);
+    const slot = (await req('/api/admin/slots', { method: 'POST', auth: token, body: {
+      title: '家庭課', date: T.addDays(d, 3), time: '18:00', duration: 60, capacity: 5 } })).data.id;
+
+    // 兩位以上時必須指定學員
+    assert.equal((await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: slot } })).status, 400);
+    assert.equal((await req(`/api/bookings/preview?slotId=${slot}&studentId=${sis}`, { auth: t })).data.pass.name, '1 堂');
+    // 不能幫別的信箱的學員或已停用的成員預約
+    assert.equal((await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: slot, studentId: ming } })).status, 403);
+    assert.equal((await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: slot, studentId: kid } })).status, 403);
+
+    const b1 = await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: slot, studentId: bro } });
+    assert.equal(b1.status, 201);
+    assert.equal(b1.data.student.name, '哥哥');
+    assert.equal(b1.data.pass.remaining, 1);
+    // 同一堂課，妹妹也可以約（扣妹妹自己的卡）
+    const b2 = await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: slot, studentId: sis } });
+    assert.equal(b2.status, 201);
+    assert.equal(b2.data.pass.remaining, 0);
+    assert.equal((await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: slot, studentId: sis } })).status, 409);
+
+    const sl = (await req('/api/slots?days=10', { auth: t })).data.slots.find((x) => x.id === slot);
+    assert.deepEqual(sl.mineIds.sort(), [bro, sis].sort());
+
+    const my = (await req('/api/my/bookings', { auth: t })).data;
+    assert.equal(my.students.length, 2);
+    assert.deepEqual(my.bookings.filter((x) => x.title === '家庭課').map((x) => x.studentName), ['哥哥', '妹妹']);
+    const passes = (await req('/api/my/passes', { auth: t })).data.passes;
+    assert.deepEqual(passes.map((p) => `${p.studentName}:${p.remaining}`).sort(), ['哥哥:1', '妹妹:0']);
+
+    // 用同一個登入取消妹妹的預約
+    const sisBooking = my.bookings.find((x) => x.studentName === '妹妹' && x.title === '家庭課');
+    assert.equal((await req(`/api/my/bookings/${sisBooking.id}/cancel`, { method: 'POST', auth: t })).status, 200);
+    // 別的帳號不能取消這個家庭的預約
+    const broBooking = my.bookings.find((x) => x.studentName === '哥哥' && x.title === '家庭課');
+    assert.equal((await req(`/api/my/bookings/${broBooking.id}/cancel`, { method: 'POST', auth: mingToken })).status, 404);
+
+    // 停用其中一位：另一位照常可用；全部停用才不能登入
+    await req(`/api/admin/students/${bro}/deactivate`, { method: 'POST', auth: token });
+    assert.deepEqual((await req('/api/me', { auth: t })).data.students.map((x) => x.name), ['妹妹']);
+    // 只剩一位時不用指定學員
+    const solo = await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: slot } });
+    assert.equal(solo.status, 201); // 剛才取消退回 1 堂，所以可以再約
+    assert.equal(solo.data.student.name, '妹妹');
+  });
+
   test('生日與當月壽星', async () => {
     const d = today();
     const ym = d.slice(0, 7);
@@ -404,6 +475,35 @@ test('舊版課程副標題升級成英文課名', () => {
     { title_en: 'Private Session', subtitle: '', subtitle_en: '' },
     { title_en: '', subtitle: '中文副標', subtitle_en: '' },
   ]);
+  db.close();
+});
+
+test('舊版（信箱不可重複）學員表升級後可共用信箱，資料與預約保留', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const { openDb, createStore } = require('../lib/db');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bk-')), 'old3.db');
+  const old = new DatabaseSync(file);
+  old.exec(`PRAGMA foreign_keys = ON;
+    CREATE TABLE slots (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, start_at TEXT NOT NULL,
+      duration_min INTEGER NOT NULL, capacity INTEGER NOT NULL, note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE students (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      phone TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), last_login TEXT);
+    CREATE TABLE bookings (id INTEGER PRIMARY KEY AUTOINCREMENT, slot_id INTEGER NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE, note TEXT NOT NULL DEFAULT '',
+      trial INTEGER NOT NULL DEFAULT 0, booked_by TEXT NOT NULL DEFAULT 'student', status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), cancelled_at TEXT);
+    INSERT INTO slots (title, start_at, duration_min, capacity) VALUES ('課', '2030-01-01T10:00', 60, 5);
+    INSERT INTO students (id, name, email) VALUES (7, '哥哥', 'fam@example.com');
+    INSERT INTO bookings (slot_id, student_id) VALUES (1, 7);`);
+  old.close();
+  const db = openDb(file);
+  const st = createStore(db);
+  assert.equal(st.getStudent(7).name, '哥哥');
+  assert.equal(st.getSlot(1).booked, 1);
+  st.createStudent({ name: '妹妹', email: 'FAM@example.com', phone: '', note: '' });
+  assert.deepEqual(st.studentsByEmail('fam@example.com').map((x) => x.name), ['哥哥', '妹妹']);
+  assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
   db.close();
 });
 

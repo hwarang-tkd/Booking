@@ -258,7 +258,7 @@
     $('addForm').reset();
     if (!students.length) await loadStudents(true);
     $('studentOptions').innerHTML = students.filter((x) => x.active)
-      .map((x) => `<option value="${esc(x.email)}">${esc(x.name)}</option>`).join('');
+      .map((x) => `<option value="${esc(`${x.name} <${x.email}>`)}"></option>`).join('');
     $('addSummary').innerHTML = `<b>${esc(ctitle(s))}</b><br>${fmtSlot(s)}　目前 ${s.booked}/${s.capacity}`;
     $('addErr').classList.add('hidden');
     $('addDlg').showModal();
@@ -267,10 +267,14 @@
     ev.preventDefault();
     const f = ev.target;
     try {
+      // 接受「姓名 <信箱>」（從清單選）、姓名或信箱；同一信箱可能有多位學員
       const who = f.who.value.trim().toLowerCase();
-      const matches = students.filter((x) => x.active && (x.email.toLowerCase() === who || x.name.toLowerCase() === who));
+      const active = students.filter((x) => x.active);
+      let matches = active.filter((x) => `${x.name} <${x.email}>`.toLowerCase() === who);
+      if (!matches.length) matches = active.filter((x) => x.name.toLowerCase() === who);
+      if (!matches.length) matches = active.filter((x) => x.email.toLowerCase() === who);
       if (matches.length !== 1) {
-        throw new Error(matches.length ? '有同名學員，請改輸入信箱' : '找不到這位學員，請先到「學員資料」新增');
+        throw new Error(matches.length ? '符合的學員不只一位，請從清單選擇「姓名 <信箱>」' : '找不到這位學員，請先到「學員資料」新增');
       }
       const r = await call(`/api/admin/slots/${adding.id}/bookings`, { method: 'POST', body: {
         studentId: matches[0].id, note: f.note.value, trial: f.trial.checked, usePass: f.nopass.checked ? 'none' : 'auto',
@@ -329,6 +333,10 @@
 
   function renderStudents() {
     const box = $('students');
+    // 同一信箱的其他學員（家庭帳號）
+    const byEmail = {};
+    for (const x of students) (byEmail[x.email.toLowerCase()] ||= []).push(x);
+    const siblings = (x) => byEmail[x.email.toLowerCase()].filter((y) => y.id !== x.id);
     const kw = $('stSearch').value.trim().toLowerCase();
     const list = students.filter(FILTERS[stFilter])
       .filter((x) => !kw || [x.name, x.email, x.phone, x.note].some((v) => (v || '').toLowerCase().includes(kw)));
@@ -349,6 +357,7 @@
             <b>${esc(x.name)}</b> ${x.active ? '' : '<span class="badge danger">已停用</span>'}
             ${x.birthday ? `<span class="${isBdayMonth(x) ? 'badge warn' : 'muted'}" style="font-size:.82rem">🎂 ${Number(x.birthday.slice(5, 7))}/${Number(x.birthday.slice(8))}（${ageNow(x.birthday)} 歲）${isBdayMonth(x) ? ' 本月壽星' : ''}</span>` : ''}
             <div class="muted" style="font-size:.88rem;word-break:break-all">${esc(x.email)}${x.phone ? `・<a href="tel:${esc(x.phone)}">${esc(x.phone)}</a>` : ''}</div>
+            ${siblings(x).length ? `<div style="font-size:.85rem;margin-top:2px">👨‍👩‍👧 同一信箱：${siblings(x).map((y) => esc(y.name)).join('、')}</div>` : ''}
             ${x.note ? `<div style="font-size:.88rem;margin-top:2px">📝 ${esc(x.note)}</div>` : ''}
             ${x.active ? `<div style="font-size:.85rem;margin-top:6px">${creditLine(x)}</div>` : ''}
             <div class="muted" style="font-size:.82rem;margin-top:4px">
@@ -435,7 +444,7 @@
     try {
       const r = await call('/api/admin/students/batch', { method: 'POST', body: { students: rows } });
       $('importDlg').close();
-      alert(`已新增 ${r.created.length} 位學員` + (r.skipped.length ? `\n\n以下信箱已經存在，已略過：\n${r.skipped.join('\n')}` : ''));
+      alert(`已新增 ${r.created.length} 位學員` + (r.skipped.length ? `\n\n以下學員已經存在（同信箱同姓名），已略過：\n${r.skipped.join('\n')}` : ''));
       loadStudents(); loadBirthdays();
     } catch (e) { showError($('importErr'), e.message); }
   });

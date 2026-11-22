@@ -91,9 +91,14 @@ async function applyConfig() {
 // ---------- 學員登入（用老師建立的信箱） ----------
 const auth = {
   get token() { return store('studentToken'); },
-  get student() { return store('student'); },
-  save(token, student) { store('studentToken', token); store('student', student); renderUserNav(); },
-  clear() { store('studentToken', null); store('student', null); renderUserNav(); },
+  // 同一個信箱可能有多位學員（例如兄弟姊妹），登入後全部都能約課
+  get students() { return store('students') || (store('student') ? [store('student')] : []); },
+  get student() { return this.students[0] || null; },
+  save(token, students) {
+    store('studentToken', token); store('students', students); store('student', null); renderUserNav();
+  },
+  clear() { store('studentToken', null); store('students', null); store('student', null); renderUserNav(); },
+  nameOf(id) { return (this.students.find((x) => x.id === id) || {}).name || ''; },
 };
 
 /** 以學員身分呼叫 API；登入失效時清除狀態。 */
@@ -120,8 +125,8 @@ async function doLogin(form, errEl) {
   btn.disabled = true;
   try {
     const r = await api('/api/login', { method: 'POST', body: { email: form.email.value } });
-    auth.save(r.token, r.student);
-    return r.student;
+    auth.save(r.token, r.students);
+    return r.students;
   } catch (e) {
     showError(errEl, e.message);
     return null;
@@ -174,10 +179,10 @@ function renderUserNav() {
   nav.querySelector('.user')?.remove();
   const a = document.createElement('a');
   a.className = 'user';
-  const st = auth.student;
-  if (st) {
+  const sts = auth.students;
+  if (auth.token && sts.length) {
     a.href = '/my';
-    a.textContent = '👤 ' + st.name;
+    a.textContent = '👤 ' + (sts.length > 1 ? `${sts[0].name} +${sts.length - 1}` : sts[0].name);
     if (location.pathname === '/my') a.setAttribute('aria-current', 'page');
   } else {
     a.href = '#';

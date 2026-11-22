@@ -145,14 +145,28 @@ function createApp(cfg) {
     const s = t && store.getSession(t);
     if (!s || s.role !== 'admin') throw new HttpError(401, '請先登入');
   }
-  /** 取得登入中的學員；required=false 時未登入回傳 null。 */
-  function currentStudent(req, required = true) {
+  /**
+   * 登入中的「家庭」：與登入學員同一個信箱、而且啟用中的所有學員（例如兄弟姊妹共用家長信箱）。
+   * required=false 時未登入回傳 null。
+   */
+  function currentFamily(req, required = true) {
     const t = bearer(req);
     const s = t && store.getSession(t);
-    const st = s && s.role === 'student' && store.getStudent(s.student_id);
-    if (st && st.active) return st;
+    const anchor = s && s.role === 'student' && store.getStudent(s.student_id);
+    const family = anchor ? store.studentsByEmail(anchor.email).filter((x) => x.active) : [];
+    if (family.length) return family;
     if (required) throw new HttpError(401, '請先用信箱登入');
     return null;
+  }
+  /** 從家庭中挑出要操作的學員；只有一位時可省略 studentId。 */
+  function pickMember(family, studentId) {
+    if (studentId === undefined || studentId === null || studentId === '') {
+      if (family.length === 1) return family[0];
+      throw new HttpError(400, '請選擇要幫哪位學員預約');
+    }
+    const st = family.find((x) => x.id === Number(studentId));
+    if (!st) throw new HttpError(403, '這位學員不在你的帳號裡');
+    return st;
   }
   const publicPass = (p) => ({
     id: p.id, name: p.name, total: p.total, used: p.used, remaining: Math.max(0, p.total - p.used),
@@ -224,12 +238,16 @@ function createApp(cfg) {
     if (to > lastDay) to = lastDay;
     if (from >= to) return { slots: [] };
     ensureGenerated(lastDay);
-    const me = currentStudent(req, false);
-    const mine = new Set(me ? store.studentBookings(me.id, from + 'T00:00')
-      .filter((b) => b.status === 'active').map((b) => b.slot_id) : []);
+    // 登入時標示家庭成員已預約的課：slotId → [studentId]
+    const booked = new Map();
+    for (const st of currentFamily(req, false) || []) {
+      for (const b of store.studentBookings(st.id, from + 'T00:00')) {
+        if (b.status === 'active') booked.set(b.slot_id, [...(booked.get(b.slot_id) || []), st.id]);
+      }
+    }
     return {
       slots: store.listSlots(from + 'T00:00', to + 'T00:00').filter(isOpen)
-        .map((s) => ({ ...publicSlot(s), mine: mine.has(s.id) })),
+        .map((s) => ({ ...publicSlot(s), mine: booked.has(s.id), mineIds: booked.get(s.id) || [] })),
     };
   });
 
@@ -237,10 +255,14 @@ function createApp(cfg) {
   route('POST', /^\/api\/login$/, (req, url, body) => {
     checkThrottle(req);
     const email = normEmail(body.email);
-    const st = store.getStudentByEmail(email);
-    if (!st) { recordFail(req, 10); throw new HttpError(404, '找不到這個信箱的學員資料，請確認信箱或聯絡老師'); }
-    if (!st.active) throw new HttpError(403, '這個帳號目前已停用，請聯絡老師');
-    return { token: store.createSession('student', st.id, STUDENT_SESSION_MS), student: publicStudent(st) };
+    const all = store.studentsByEmail(email);
+    if (!all.length) { recordFail(req, 10); throw new HttpError(404, '找不到這個信箱的學員資料，請確認信箱或聯絡老師'); }
+    const family = all.filter((x) => x.active);
+    if (!family.length) throw new HttpError(403, '這個帳號目前已停用，請聯絡老師');
+    return {
+      token: store.createSession('student', family[0].id, STUDENT_SESSION_MS),
+      students: family.map(publicStudent),
+    };
   });
 
   route('POST', /^\/api\/logout$/, (req) => {
@@ -249,10 +271,10 @@ function createApp(cfg) {
     return { ok: true };
   });
 
-  route('GET', /^\/api\/me$/, (req) => ({ student: publicStudent(currentStudent(req)) }));
+  route('GET', /^\/api\/me$/, (req) => ({ students: currentFamily(req).map(publicStudent) }));
 
   route('POST', /^\/api\/bookings$/, (req, url, body) => {
-    const me = currentStudent(req);
+    const me = pickMember(currentFamily(req), body.studentId);
     const slotId = int(body.slotId, 1, Number.MAX_SAFE_INTEGER, '課程');
     const note = str(body.note, 200, '備註', { required: false });
     const slot = store.getSlot(slotId);
@@ -262,27 +284,35 @@ function createApp(cfg) {
     const r = store.book({ slotId, studentId: me.id, note, trial: false, bookedBy: 'student', isOpen,
       usePass: 'auto', requirePass: cfg.requirePass });
     if (r.error) throw new HttpError(r.status, r.error);
-    return { status: 201, body: { id: r.booking.id, slot: publicSlot(r.slot), pass: r.pass && publicPass(r.pass) } };
+    return { status: 201, body: {
+      id: r.booking.id, student: publicStudent(me), slot: publicSlot(r.slot), pass: r.pass && publicPass(r.pass),
+    } };
   });
 
   // 預約前先看會扣哪張卡
   route('GET', /^\/api\/bookings\/preview$/, (req, url) => {
-    const me = currentStudent(req);
+    const me = pickMember(currentFamily(req), url.searchParams.get('studentId'));
     const pass = store.previewPass(Number(url.searchParams.get('slotId')), me.id);
     return { pass: pass && publicPass(pass), required: cfg.requirePass };
   });
 
   route('GET', /^\/api\/my\/passes$/, (req) => {
-    const me = currentStudent(req);
-    return { passes: store.listPasses(me.id).filter((p) => !p.voided).map(publicPass) };
+    const family = currentFamily(req);
+    return {
+      passes: family.flatMap((st) => store.listPasses(st.id).filter((p) => !p.voided)
+        .map((p) => ({ ...publicPass(p), studentId: st.id, studentName: st.name }))),
+    };
   });
 
   route('GET', /^\/api\/my\/bookings$/, (req) => {
-    const me = currentStudent(req);
+    const family = currentFamily(req);
     const since = T.addDays(today(), -14) + 'T00:00';
+    const rows = family.flatMap((st) => store.studentBookings(st.id, since).map((b) => ({ ...b, st })))
+      .sort((a, b) => a.start_at.localeCompare(b.start_at) || a.st.id - b.st.id);
     return {
-      student: publicStudent(me),
-      bookings: store.studentBookings(me.id, since).map((b) => ({
+      students: family.map(publicStudent),
+      bookings: rows.map((b) => ({
+        studentId: b.st.id, studentName: b.st.name,
         id: b.id, status: b.status, trial: !!b.trial, note: b.note, passName: b.pass_name, title: b.title, subtitle: b.subtitle,
         titleEn: b.title_en, subtitleEn: b.subtitle_en,
         category: b.category, startAt: b.start_at, durationMin: b.duration_min, past: b.start_at <= now(),
@@ -292,9 +322,9 @@ function createApp(cfg) {
   });
 
   route('POST', /^\/api\/my\/bookings\/(\d+)\/cancel$/, (req, url, body, [, id]) => {
-    const me = currentStudent(req);
+    const family = currentFamily(req);
     const b = store.getBooking(Number(id));
-    if (!b || b.student_id !== me.id) throw new HttpError(404, '找不到這筆預約');
+    if (!b || !family.some((x) => x.id === b.student_id)) throw new HttpError(404, '找不到這筆預約');
     if (b.status !== 'active') throw new HttpError(409, '這筆預約已經取消了');
     if (!canCancel(store.getSlot(b.slot_id))) throw new HttpError(409, `上課前 ${cfg.cancelHours} 小時內無法線上取消，請直接聯絡老師`);
     store.cancelBooking(b.id);
@@ -334,7 +364,9 @@ function createApp(cfg) {
   route('POST', /^\/api\/admin\/students$/, (req, url, body) => {
     requireAdmin(req);
     const input = parseStudent(body);
-    if (store.getStudentByEmail(input.email)) throw new HttpError(409, `信箱 ${input.email} 已經有學員資料了`);
+    if (store.findStudent(input.email, input.name)) {
+      throw new HttpError(409, `信箱 ${input.email} 底下已經有同名學員「${input.name}」`);
+    }
     return { status: 201, body: { id: store.createStudent(input) } };
   });
 
@@ -347,10 +379,12 @@ function createApp(cfg) {
       try { return parseStudent(x || {}); }
       catch (e) { throw new HttpError(400, `第 ${i + 1} 筆：${e.message}`); }
     });
-    const emails = new Set();
+    // 同一信箱可以有多位學員，但同一信箱不能出現兩次同樣的姓名
+    const seen = new Set();
     for (const it of items) {
-      if (emails.has(it.email)) throw new HttpError(400, `信箱重複：${it.email}`);
-      emails.add(it.email);
+      const key = `${it.email}\n${it.name.toLowerCase()}`;
+      if (seen.has(key)) throw new HttpError(400, `重複：${it.name} <${it.email}>`);
+      seen.add(key);
     }
     return { status: 201, body: store.createStudents(items) };
   });
@@ -411,8 +445,10 @@ function createApp(cfg) {
   route('PUT', /^\/api\/admin\/students\/(\d+)$/, (req, url, body, [, id]) => {
     requireAdmin(req);
     const input = parseStudent(body);
-    const other = store.getStudentByEmail(input.email);
-    if (other && other.id !== Number(id)) throw new HttpError(409, `信箱 ${input.email} 已經被 ${other.name} 使用`);
+    const other = store.findStudent(input.email, input.name);
+    if (other && other.id !== Number(id)) {
+      throw new HttpError(409, `信箱 ${input.email} 底下已經有同名學員「${input.name}」`);
+    }
     if (!store.updateStudent(Number(id), input)) throw new HttpError(404, '找不到這位學員');
     return { ok: true };
   });

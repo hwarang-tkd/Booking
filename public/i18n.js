@@ -91,11 +91,16 @@ const EN = {
   '備註': 'Note', '會自動從學員最快到期的堂數卡扣一堂；沒有堂數時仍可代約，名單會標示「未扣堂」。':
     'One credit is taken from the student\'s soonest-expiring card. Without credits you can still book; the roster will show "No credit".',
   '加入': 'Add', '新增學員': 'Add student', '編輯學員': 'Edit student', '姓名': 'Name', '（學員用來登入）': '(used to log in)',
+  '（學員用來登入；兄弟姊妹可以共用同一個信箱）': '(used to log in; siblings can share one email)',
+  '（輸入姓名或信箱，從清單選擇）': '(type a name or email and pick from the list)',
+  '幫誰預約？': 'Book for:', '換別的信箱登入': 'Log in with a different email',
+  '符合的學員不只一位，請從清單選擇「姓名 <信箱>」': 'More than one student matches — pick "name <email>" from the list',
+  '請選擇要幫哪位學員預約': 'Please choose which student to book for', '這位學員不在你的帳號裡': 'That student isn\'t on your account',
   '電話': 'Phone', '生日': 'Birthday', '老師備註': 'Instructor note',
   '（選填，學員看不到，例如：家長姓名、帶別、方案）': '(optional, hidden from student — e.g. parent, belt, plan)',
   '批次匯入學員': 'Bulk import students', '每行一位：': 'One per line: ', '姓名, 信箱, 電話, 生日': 'name, email, phone, birthday',
-  '（電話、生日可省略；生日寫成 2015-03-21 或 2015/3/21）。可以直接從 Excel／Google 試算表複製貼上。':
-    ' (phone and birthday optional; birthday like 2015-03-21). You can paste directly from Excel / Google Sheets.',
+  '（電話、生日可省略；生日寫成 2015-03-21 或 2015/3/21）。兄弟姊妹可以用同一個信箱。可以直接從 Excel／Google 試算表複製貼上。':
+    ' (phone and birthday optional; birthday like 2015-03-21). Siblings can share one email. You can paste directly from Excel / Google Sheets.',
   '匯入': 'Import', '堂數': 'Credits', '新增堂數卡': 'New credit card', '快速套用收費方案：': 'Quick presets:',
   '方案名稱': 'Plan name', '購買日': 'Purchased', '開始日': 'Start date', '到期日': 'Expiry date', '（含當天）': '(inclusive)',
   '適用課程': 'Valid for', '（都不勾 = 全部課程）': '(none checked = all classes)',
@@ -224,6 +229,7 @@ const PATTERNS = [
   ['已新增 {}，請告訴學員用 {} 登入', (n, e) => `Added ${n}. Tell them to log in with ${e}`],
   ['已新增 {} 位學員', (n) => `Added ${plural(n, 'student', 'students')}`],
   ['以下信箱已經存在，已略過：', () => 'These emails already exist and were skipped:'],
+  ['以下學員已經存在（同信箱同姓名），已略過：', () => 'These students already exist (same email and name) and were skipped:'],
   ['共 {} 位，其中 {} 行缺少姓名或信箱', (a, b) => `${a} rows, ${b} missing a name or email`], ['共 {} 位', (a) => `${a} rows`],
   ['{} 的預約紀錄', (n) => `${n} — booking history`], ['{} 的堂數', (n) => `${n} — credits`],
   ['剩 {}', (n) => `${n} left`], ['/ 共 {} 堂（已用 {}）', (a, b) => `/ ${a} total (${b} used)`],
@@ -242,6 +248,18 @@ const PATTERNS = [
   ['上課前 {} 小時內無法線上取消，請直接聯絡老師', (h) => `Online cancellation closes ${h} hours before class — please contact your instructor`],
   ['請填寫{}', (f) => `Please fill in: ${f}`], ['{}太長（最多 {} 字）', (f, n) => `${f} is too long (max ${n})`],
   ['{}需為 {}–{} 的整數', (f, a, b) => `${f} must be a whole number from ${a} to ${b}`],
+
+  // 一個信箱多位學員
+  ['{}（已預約）', (n) => `${n} (booked)`], ['✓ {} 已預約', (n) => `✓ Booked: ${n}`],
+  ['⚠️ {} 目前', (n) => `⚠️ ${n} currently has `],
+  ['✅ 已幫 {} 預約 {}「{}」，「{}」剩 {} 堂', (n, s, c, p, r) => `✅ Booked ${c}, ${s} for ${n}. "${p}": ${r} left`],
+  ['✅ 已幫 {} 預約 {}「{}」', (n, s, c) => `✅ Booked ${c}, ${s} for ${n}`],
+  ['{}（{} 位學員共用）', (e, n) => `${e} (shared by ${n} students)`],
+  ['👤 {}：目前沒有可用的堂數', (n) => `👤 ${n}: no available credits`],
+  ['確定取消 {} 的 {}「{}」？', (n, s, c) => `Cancel ${n}'s ${c}, ${s}?`],
+  ['👨‍👩‍👧 同一信箱：{}', (n) => `👨‍👩‍👧 Same email: ${n}`],
+  ['信箱 {} 底下已經有同名學員「{}」', (e, n) => `${e} already has a student named "${n}"`], ['重複：{}', (x) => `Duplicate: ${x}`],
+  ['👤 {}・{}', (n, p) => `👤 ${n} · ${p}`],
 
   // 後台：固定課表
   ['{}・名額 {}', (s, n) => `${s} · capacity ${n}`], ['名額 {}', (n) => `Capacity ${n}`],

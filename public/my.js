@@ -28,11 +28,12 @@
     const res = $('result');
     res.innerHTML = '<div class="empty">載入中…</div>';
     try {
-      const [{ student, bookings }, { passes }] = await Promise.all([sapi('/api/my/bookings'), sapi('/api/my/passes')]);
+      const [{ students, bookings }, { passes }] = await Promise.all([sapi('/api/my/bookings'), sapi('/api/my/passes')]);
+      auth.save(auth.token, students);
+      many = students.length > 1;
+      $('meName').textContent = students.map((x) => x.name).join('、');
+      $('meEmail').textContent = students[0].email + (many ? `（${students.length} 位學員共用）` : '');
       renderPasses(passes);
-      auth.save(auth.token, student);
-      $('meName').textContent = student.name;
-      $('meEmail').textContent = student.email;
       const upcoming = bookings.filter((b) => !b.past && b.status === 'active');
       const past = bookings.filter((b) => b.past && b.status === 'active' && !b.slotCancelled);
       const cancelled = bookings.filter((b) => !b.past && b.status === 'cancelled');
@@ -54,6 +55,7 @@
     }
   }
 
+  let many = false;
   function renderPasses(passes) {
     const box = $('passes');
     const today = (cfg.now || '').slice(0, 10);
@@ -70,7 +72,7 @@
       const pct = Math.round((p.used / p.total) * 100);
       return `<div class="card${live || p.status === 'future' ? '' : ' past'}" style="padding:14px 16px">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap">
-          <b>${esc(p.name)}</b> <span class="badge ${label[p.status][0]}">${label[p.status][1]}</span>
+          <b>${many ? `👤 ${esc(p.studentName)}・` : ''}${esc(p.name)}</b> <span class="badge ${label[p.status][0]}">${label[p.status][1]}</span>
         </div>
         <div style="font-size:1.5rem;font-weight:800;margin-top:4px">剩 ${p.remaining} 堂
           <span class="muted" style="font-size:.9rem;font-weight:400">／共 ${p.total} 堂</span></div>
@@ -82,7 +84,9 @@
         </div>
         ${p.categories.length ? `<div class="muted" style="font-size:.82rem">適用：${p.categories.map(catName).join('、')}</div>` : ''}
       </div>`;
-    }).join('');
+    }).join('') + (many ? auth.students
+      .filter((st) => !passes.some((p) => p.studentId === st.id && p.status === 'active'))
+      .map((st) => `<div class="card muted" style="padding:12px 16px">👤 ${esc(st.name)}：目前沒有可用的堂數</div>`).join('') : '');
   }
 
   function card(b) {
@@ -96,6 +100,7 @@
     el.innerHTML = `
       <div class="time"><b>${b.startAt.slice(11)}</b><small>${fmtDate(b.startAt.slice(0, 10))}</small></div>
       <div class="info">
+        ${many ? `<div style="font-size:.85rem;font-weight:700">👤 ${esc(b.studentName)}</div>` : ''}
         <div class="title" ${cancelled ? 'style="text-decoration:line-through;opacity:.6"' : ''}>${esc(ctitle(b))}</div>
         ${csub(b) ? `<div class="subtitle">${esc(csub(b))}</div>` : ''}
         <div class="meta">${badge}${b.trial ? '<span class="badge warn">體驗課</span>' : ''}
@@ -106,7 +111,7 @@
       </div>
       ${b.cancellable ? '<div class="actions"><button class="btn danger small">取消預約</button></div>' : ''}`;
     el.querySelector('button')?.addEventListener('click', async (ev) => {
-      if (!confirm(`確定取消 ${fmtSlot(b)}「${ctitle(b)}」？`)) return;
+      if (!confirm(many ? `確定取消 ${b.studentName} 的 ${fmtSlot(b)}「${ctitle(b)}」？` : `確定取消 ${fmtSlot(b)}「${ctitle(b)}」？`)) return;
       ev.target.disabled = true;
       try {
         await sapi(`/api/my/bookings/${b.id}/cancel`, { method: 'POST' });

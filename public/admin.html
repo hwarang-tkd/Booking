@@ -155,7 +155,7 @@
       <div class="dlg-head"><h3>幫學員預約</h3></div>
       <div class="dlg-body stack">
         <div class="summary" id="addSummary"></div>
-        <label class="field">學員 <span class="hint">（輸入姓名或信箱搜尋）</span>
+        <label class="field">學員 <span class="hint">（輸入姓名或信箱，從清單選擇）</span>
           <input type="text" name="who" list="studentOptions" required autocomplete="off">
         </label>
         <datalist id="studentOptions"></datalist>
@@ -178,7 +178,7 @@
       <div class="dlg-head"><h3 id="stTitle">新增學員</h3></div>
       <div class="dlg-body stack">
         <label class="field">姓名 <input type="text" name="name" maxlength="40" required></label>
-        <label class="field">電子信箱 <span class="hint">（學員用來登入）</span>
+        <label class="field">電子信箱 <span class="hint">（學員用來登入；兄弟姊妹可以共用同一個信箱）</span>
           <input type="email" name="email" required autocomplete="off">
         </label>
         <div class="row">
@@ -202,7 +202,7 @@
     <form id="importForm" method="dialog">
       <div class="dlg-head"><h3>批次匯入學員</h3></div>
       <div class="dlg-body stack">
-        <p style="margin:0;font-size:.92rem">每行一位：<b>姓名, 信箱, 電話, 生日</b>（電話、生日可省略；生日寫成 2015-03-21 或 2015/3/21）。可以直接從 Excel／Google 試算表複製貼上。</p>
+        <p style="margin:0;font-size:.92rem">每行一位：<b>姓名, 信箱, 電話, 生日</b>（電話、生日可省略；生日寫成 2015-03-21 或 2015/3/21）。兄弟姊妹可以用同一個信箱。可以直接從 Excel／Google 試算表複製貼上。</p>
         <textarea name="text" rows="8" required placeholder="王小明, ming@example.com, 0912345678&#10;陳小華, hua@example.com"></textarea>
         <p class="muted" id="importPreview" style="margin:0;font-size:.9rem"></p>
         <div id="importErr" class="hidden"></div>
