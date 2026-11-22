@@ -66,6 +66,25 @@ WordPress.com 主機不能跑這個系統（它只跑 WordPress），所以約�
 
 ---
 
+## 五、設定寄信（忘記密碼用，選用）
+
+沒設定也能運作：學員按「忘記密碼」時會請他聯絡老師，老師在後台「學員資料 → 密碼連結」產生連結，用 LINE 傳給學員即可。
+想讓學員自己收信設定密碼：
+
+1. 到 <https://resend.com> 免費註冊（每月 3,000 封）。
+2. **Domains → Add Domain**，輸入 `hwarang-tkd-tw.com`，Resend 會列出幾筆 DNS 記錄（TXT／MX）。
+3. 到 WordPress.com 的 DNS 記錄，照 Resend 顯示的內容逐筆新增，回 Resend 按 Verify。
+4. Resend → **API Keys → Create API Key**，複製下來。
+5. Railway → Variables 新增：
+
+   | 名稱 | 值 |
+   | --- | --- |
+   | `RESEND_API_KEY` | 剛剛複製的 key |
+   | `MAIL_FROM` | `花郎武道館 <no-reply@hwarang-tkd-tw.com>` |
+   | `PUBLIC_URL` | `https://booking.hwarang-tkd-tw.com` |
+
+（Railway Hobby 方案不能用 SMTP 寄信，所以這裡用 Resend 的 HTTPS API。）
+
 ## 日常維護
 
 - **程式更新**：推到 GitHub 的部署分支，Railway 會自動重新部署，資料保留在 Volume 裡。

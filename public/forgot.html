@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>設定密碼</title>
+  <link rel="icon" href="/logo.png" type="image/png">
+  <meta name="theme-color" content="#d4959a">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/"><img src="/logo.png" alt=""><span data-school>花郎武道館</span></a>
+      <nav class="nav" data-student>
+        <a href="/">預約課程</a>
+        <a href="/info">課表與收費</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>忘記密碼／舊生設定密碼</h1>
+    <p class="sub">輸入你登記的信箱，我們會寄一封「設定密碼」的信給你。</p>
+    <form id="form" class="card stack" style="max-width:440px">
+      <label class="field">電子信箱
+        <input type="email" name="email" required autocomplete="email" inputmode="email" placeholder="name@example.com">
+      </label>
+      <div id="msg" class="hidden"></div>
+      <button class="btn block" type="submit">寄送設定密碼連結</button>
+      <p class="muted" style="font-size:.88rem;margin:0">收不到信？請檢查垃圾郵件匣，或直接聯絡老師幫你產生設定密碼的連結。</p>
+    </form>
+  </main>
+
+  <footer class="site"></footer>
+  <script src="/i18n.js"></script>
+  <script src="/common.js"></script>
+  <script>
+    (async () => {
+      applyConfig().catch(() => {});
+      const f = document.getElementById('form'), msg = document.getElementById('msg');
+      f.email.value = new URLSearchParams(location.search).get('email') || '';
+      f.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const btn = f.querySelector('button');
+        btn.disabled = true;
+        try {
+          const r = await api('/api/password/forgot', { method: 'POST', body: { email: f.email.value } });
+          msg.className = r.sent ? 'alert ok' : 'alert error';
+          msg.textContent = r.sent
+            ? `如果 ${f.email.value.trim()} 有註冊，設定密碼的信已經寄出，請在 24 小時內點信中的連結。`
+            : r.message;
+        } catch (e) {
+          showError(msg, e.message);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

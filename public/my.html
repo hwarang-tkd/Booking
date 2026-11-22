@@ -24,7 +24,7 @@
 
     <!-- 未登入 -->
     <form id="loginForm" class="card stack hidden" style="max-width:420px">
-      <p style="margin:0">用你的信箱登入，查看和取消預約。</p>
+      <p style="margin:0">用你的信箱和密碼登入，查看和取消預約。</p>
       <div data-login></div>
       <button class="btn block" type="submit">登入</button>
     </form>
@@ -42,6 +42,23 @@
       <h2>我的堂數</h2>
       <div id="passes" class="stack"></div>
       <div id="result" class="stack" style="margin-top:8px" aria-live="polite"></div>
+
+      <h2>帳號設定</h2>
+      <div class="card stack">
+        <a class="btn secondary" href="/register?add=1" style="align-self:flex-start">＋ 新增家人（兄弟姊妹）</a>
+        <details>
+          <summary style="cursor:pointer;font-weight:600">變更密碼</summary>
+          <form id="pwForm" class="stack" style="margin-top:10px;max-width:380px">
+            <input type="email" name="username" autocomplete="username" class="hidden" aria-hidden="true" tabindex="-1">
+            <label class="field">目前的密碼 <input type="password" name="current" autocomplete="current-password"></label>
+            <label class="field">新密碼 <span class="hint">（至少 8 個字元）</span>
+              <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+            <label class="field">再輸入一次 <input type="password" name="password2" required minlength="8" autocomplete="new-password"></label>
+            <div id="pwMsg" class="hidden"></div>
+            <button class="btn" type="submit">變更密碼</button>
+          </form>
+        </details>
+      </div>
     </section>
   </main>
 

@@ -125,5 +125,16 @@
     return el;
   }
 
+  $('pwForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = ev.target, msg = $('pwMsg');
+    if (f.password.value !== f.password2.value) return showError(msg, '兩次輸入的密碼不一樣');
+    try {
+      await sapi('/api/my/password', { method: 'POST', body: { current: f.current.value, password: f.password.value } });
+      f.reset();
+      msg.className = 'alert ok'; msg.textContent = '密碼已變更';
+    } catch (e) { showError(msg, e.message); }
+  });
+
   show();
 })();

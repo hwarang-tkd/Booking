@@ -186,6 +186,8 @@
           <td><b>${esc(b.name)}</b> ${b.trial ? '<span class="badge warn">體驗</span>' : ''}
             ${b.bookedBy === 'admin' ? '<span class="badge">代約</span>' : ''}
             ${b.birthdayToday ? '<span class="badge warn" title="今天生日">🎂 生日</span>' : ''}
+            ${b.consentPhoto === 'no' ? '<span class="badge danger" title="不同意攝影使用">📷✗ 不拍照</span>' : ''}
+            ${b.healthNotes ? `<div class="health">⚠️ ${esc(b.healthNotes)}</div>` : ''}
             ${b.status === 'active' ? (b.passName ? `<div class="muted" style="font-size:.8rem">🎫 ${esc(b.passName)}</div>`
               : b.trial ? '' : '<span class="badge danger" title="這堂沒有扣到堂數，可能需要收費">未扣堂</span>') : ''}
             ${b.note ? `<div class="muted" style="font-size:.85rem">${esc(b.note)}</div>` : ''}</td>
@@ -313,6 +315,9 @@
     expiring: (x) => x.active && x.credits.remaining > 0 && (x.credits.remaining <= 1 || daysUntil(x.credits.nextExpiry) <= 7),
     bday: (x) => x.active && isBdayMonth(x),
     inactive: (x) => !x.active,
+    self: (x) => x.source === 'self',
+    health: (x) => x.active && !!x.healthNotes,
+    nopw: (x) => x.active && !x.hasPassword,
   };
   document.querySelectorAll('#stFilters [data-f]').forEach((b) => b.addEventListener('click', () => {
     stFilter = b.dataset.f;
@@ -358,6 +363,13 @@
             ${x.birthday ? `<span class="${isBdayMonth(x) ? 'badge warn' : 'muted'}" style="font-size:.82rem">🎂 ${Number(x.birthday.slice(5, 7))}/${Number(x.birthday.slice(8))}（${ageNow(x.birthday)} 歲）${isBdayMonth(x) ? ' 本月壽星' : ''}</span>` : ''}
             <div class="muted" style="font-size:.88rem;word-break:break-all">${esc(x.email)}${x.phone ? `・<a href="tel:${esc(x.phone)}">${esc(x.phone)}</a>` : ''}</div>
             ${siblings(x).length ? `<div style="font-size:.85rem;margin-top:2px">👨‍👩‍👧 同一信箱：${siblings(x).map((y) => esc(y.name)).join('、')}</div>` : ''}
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;font-size:.8rem">
+              ${x.gender ? `<span class="badge">${{ M: '男', F: '女', X: '其他' }[x.gender]}</span>` : ''}
+              ${x.source === 'self' ? `<span class="badge ok">自行註冊 ${fmtDate(x.createdAt.slice(0, 10))}</span>` : ''}
+              ${x.consentPhoto === 'no' ? '<span class="badge danger">📷 不同意攝影</span>' : x.consentPhoto === 'yes' ? '<span class="badge">📷 同意攝影</span>' : ''}
+              ${x.hasPassword ? '' : '<span class="badge warn">🔑 尚未設定密碼</span>'}
+            </div>
+            ${x.healthNotes ? `<div class="health" style="margin-top:4px">⚠️ 須留意：${esc(x.healthNotes)}</div>` : ''}
             ${x.note ? `<div style="font-size:.88rem;margin-top:2px">📝 ${esc(x.note)}</div>` : ''}
             ${x.active ? `<div style="font-size:.85rem;margin-top:6px">${creditLine(x)}</div>` : ''}
             <div class="muted" style="font-size:.82rem;margin-top:4px">
@@ -367,6 +379,7 @@
           <div class="btns" style="margin:0">
             <button class="btn small" data-act="pass">堂數</button>
             <button class="btn secondary small" data-act="hist">紀錄</button>
+            <button class="btn secondary small" data-act="link">密碼連結</button>
             <button class="btn secondary small" data-act="edit">編輯</button>
             ${x.active ? '<button class="btn danger small" data-act="off">停用</button>'
               : '<button class="btn secondary small" data-act="on">啟用</button>'}
@@ -376,6 +389,16 @@
       const act = (n, fn) => { const b = el.querySelector(`[data-act="${n}"]`); if (b) b.onclick = fn; };
       act('edit', () => openStudent(x));
       act('hist', () => openHistory(x));
+      act('link', async () => {
+        try {
+          const r = await call(`/api/admin/students/${x.id}/reset-link`, { method: 'POST' });
+          $('linkWho').innerHTML = `把這個連結傳給 <b>${esc(x.name)}</b>（${esc(r.email)}），點開就能設定密碼：`;
+          $('linkUrl').value = r.url;
+          $('linkHint').textContent = `${r.days} 天內有效，只能使用一次。同一個信箱的家人共用這組密碼。`;
+          $('linkDlg').showModal();
+          $('linkUrl').select();
+        } catch (e) { fail(e); }
+      });
       act('pass', () => openPasses(x));
       act('off', async () => {
         if (!confirm(`停用 ${x.name}？停用後無法登入約課（已預約的課不受影響）。`)) return;
@@ -400,7 +423,10 @@
     f.reset();
     $('stTitle').textContent = x ? '編輯學員' : '新增學員';
     f.birthday.max = todayStr();
-    if (x) { f.name.value = x.name; f.email.value = x.email; f.phone.value = x.phone; f.note.value = x.note; f.birthday.value = x.birthday || ''; }
+    if (x) {
+      f.name.value = x.name; f.email.value = x.email; f.phone.value = x.phone; f.note.value = x.note; f.birthday.value = x.birthday || '';
+      f.gender.value = x.gender || ''; f.healthNotes.value = x.healthNotes || '';
+    }
     $('stErr').classList.add('hidden');
     $('stDlg').showModal();
     f.name.focus();
@@ -409,7 +435,10 @@
   $('stForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const f = ev.target;
-    const body = { name: f.name.value, email: f.email.value, phone: f.phone.value, note: f.note.value, birthday: f.birthday.value };
+    const body = {
+      name: f.name.value, email: f.email.value, phone: f.phone.value, note: f.note.value, birthday: f.birthday.value,
+      gender: f.gender.value, healthNotes: f.healthNotes.value,
+    };
     try {
       if (editingStudent) await call(`/api/admin/students/${editingStudent.id}`, { method: 'PUT', body });
       else await call('/api/admin/students', { method: 'POST', body });
@@ -467,6 +496,11 @@
         </tr>`).join('')}</tbody></table></div>` : '<div class="empty">還沒有預約紀錄</div>';
     } catch (e) { $('histBody').innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
   }
+
+  $('linkCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText($('linkUrl').value); toast('已複製連結'); }
+    catch { $('linkUrl').select(); document.execCommand('copy'); toast('已複製連結'); }
+  };
 
   // ---------- 堂數卡 ----------
   const GROUP = ['tkd', 'kids', 'combat', 'blackbelt'];

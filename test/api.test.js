@@ -49,6 +49,19 @@ describe('預設課表', () => {
 
 describe('API', () => {
   let req, server, base, token;
+  const PW = 'pass1234';
+  /** 學員登入；還沒設定密碼的舊生，先用老師產生的連結設定密碼。 */
+  async function login(email) {
+    let r = await req('/api/login', { method: 'POST', body: { email, password: PW } });
+    if (r.data && r.data.code === 'NO_PASSWORD') {
+      const st = (await req('/api/admin/students', { auth: token })).data.students
+        .find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
+      const link = (await req(`/api/admin/students/${st.id}/reset-link`, { method: 'POST', auth: token })).data.url;
+      await req('/api/password/reset', { method: 'POST', body: { token: new URL(link).searchParams.get('token'), password: PW } });
+      r = await req('/api/login', { method: 'POST', body: { email, password: PW } });
+    }
+    return r;
+  }
   before(async () => { ({ req, server, base } = await start({ seedSchedule: false })); });
   after(() => server.close());
 
@@ -106,8 +119,8 @@ describe('API', () => {
   });
 
   test('學員用信箱登入；未建立的信箱、停用的帳號不能登入', async () => {
-    assert.equal((await req('/api/login', { method: 'POST', body: { email: 'nobody@example.com' } })).status, 404);
-    const r = await req('/api/login', { method: 'POST', body: { email: '  MING@example.com ' } });
+    assert.equal((await login('nobody@example.com')).status, 401);
+    const r = await login('  MING@example.com ');
     assert.equal(r.status, 200);
     assert.deepEqual(r.data.students.map((x) => x.name), ['小明']);
     mingToken = r.data.token;
@@ -115,16 +128,16 @@ describe('API', () => {
     assert.equal((await req('/api/me')).status, 401);
     // 學員的登入不能進後台
     assert.equal((await req('/api/admin/students', { auth: mingToken })).status, 401);
-    huaToken = (await req('/api/login', { method: 'POST', body: { email: 'hua@example.com' } })).data.token;
+    huaToken = (await login('hua@example.com')).data.token;
 
     assert.equal((await req(`/api/admin/students/${mei}/deactivate`, { method: 'POST', auth: token })).status, 200);
-    assert.equal((await req('/api/login', { method: 'POST', body: { email: 'mei@example.com' } })).status, 403);
+    assert.equal((await login('mei@example.com')).status, 403);
     assert.equal((await req(`/api/admin/students/${mei}/activate`, { method: 'POST', auth: token })).status, 200);
   });
 
   test('堂數卡：開卡、沒有堂數不能約', async () => {
     const tomorrowSlot = (await req('/api/slots?days=20')).data.slots.find((s) => s.title === '兒童班');
-    const huaT = (await req('/api/login', { method: 'POST', body: { email: 'hua@example.com' } })).data.token;
+    const huaT = (await login('hua@example.com')).data.token;
     // 還沒開卡：不能約
     const no = await req('/api/bookings', { method: 'POST', auth: huaT, body: { slotId: tomorrowSlot.id } });
     assert.equal(no.status, 409);
@@ -154,7 +167,7 @@ describe('API', () => {
     assert.equal((await req('/api/slots?days=20', { auth: huaToken })).data.slots.find((s) => s.id === slot.id).mine, false);
 
     assert.equal((await req('/api/bookings', { method: 'POST', auth: huaToken, body: { slotId: slot.id } })).status, 201);
-    const meiToken = (await req('/api/login', { method: 'POST', body: { email: 'mei@example.com' } })).data.token;
+    const meiToken = (await login('mei@example.com')).data.token;
     const c = await req('/api/bookings', { method: 'POST', auth: meiToken, body: { slotId: slot.id } });
     assert.equal(c.status, 409);
     assert.equal(c.data.error, '這堂課已額滿');
@@ -232,7 +245,7 @@ describe('API', () => {
     // 編輯學員信箱：不能和別人重複
     assert.equal((await req(`/api/admin/students/${hua}`, { method: 'PUT', auth: token, body: { name: '小明', email: 'ming@example.com' } })).status, 409);
     assert.equal((await req(`/api/admin/students/${hua}`, { method: 'PUT', auth: token, body: { name: '小華', email: 'hua2@example.com' } })).status, 200);
-    assert.equal((await req('/api/login', { method: 'POST', body: { email: 'hua2@example.com' } })).status, 200);
+    assert.equal((await login('hua2@example.com')).status, 200);
 
     const { data: t } = await req('/api/admin/templates', { auth: token });
     const del = await req(`/api/admin/templates/${t.templates[0].id}`, { method: 'DELETE', auth: token });
@@ -257,7 +270,7 @@ describe('API', () => {
         title, category, date, time: '20:00', duration: 60, capacity: 10 } })).data.id;
     };
     const st = (await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '阿卡', email: 'card@example.com' } })).data.id;
-    const t = (await req('/api/login', { method: 'POST', body: { email: 'card@example.com' } })).data.token;
+    const t = (await login('card@example.com')).data.token;
     const mk = (body) => req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: token, body });
     const passes = async () => (await req(`/api/admin/students/${st}/passes`, { auth: token })).data.passes;
     const book = (slotId) => req('/api/bookings', { method: 'POST', auth: t, body: { slotId } });
@@ -345,7 +358,7 @@ describe('API', () => {
     await req(`/api/admin/students/${kid}/deactivate`, { method: 'POST', auth: token });
 
     // 登入列出啟用中的家庭成員
-    const lg = await req('/api/login', { method: 'POST', body: { email: 'family@example.com' } });
+    const lg = await login('family@example.com');
     assert.equal(lg.status, 200);
     assert.deepEqual(lg.data.students.map((x) => x.name), ['哥哥', '妹妹']);
     const t = lg.data.token;
@@ -432,6 +445,114 @@ describe('API', () => {
     }
     assert.notEqual((await req('/..%2fserver.js')).status, 200);
   });
+});
+
+describe('註冊、密碼、忘記密碼', () => {
+  let req, server, admin;
+  const sent = [];
+  before(async () => {
+    ({ req, server } = await start({ seedSchedule: false, mailer: { enabled: true, send: async (m) => { sent.push(m); } } }));
+    admin = (await req('/api/admin/login', { method: 'POST', body: { password: 'secret' } })).data.token;
+  });
+  after(() => server.close());
+  const kid = (name, extra = {}) => ({ name, gender: 'M', birthday: '2016-05-01', ...extra });
+  const reg = (body) => req('/api/register', { method: 'POST', body: {
+    email: 'new@example.com', password: 'longpass1', consentPrivacy: true, consentPhoto: 'no', ...body } });
+
+  test('新生註冊：必填欄位與同意書', async () => {
+    assert.equal((await reg({ students: [kid('小新')], consentPrivacy: false })).status, 400);
+    assert.equal((await reg({ students: [kid('小新')], consentPhoto: undefined })).status, 400);
+    assert.equal((await reg({ students: [kid('小新')], password: 'short' })).status, 400);
+    assert.equal((await reg({ students: [{ name: '小新', birthday: '2016-05-01' }] })).status, 400); // 沒選性別
+    assert.equal((await reg({ students: [{ name: '小新', gender: 'F' }] })).status, 400);             // 沒填生日
+    const r = await reg({ students: [kid('小新', { healthNotes: '氣喘，請準備吸入器' }), kid('小葵', { gender: 'F', birthday: '2019-01-02' })] });
+    assert.equal(r.status, 201);
+    assert.deepEqual(r.data.students.map((x) => x.name), ['小新', '小葵']);
+    assert.equal((await req('/api/me', { auth: r.data.token })).status, 200); // 註冊後自動登入
+    const again = await reg({ students: [kid('小新')] });
+    assert.equal(again.status, 409);
+    assert.equal(again.data.code, 'EMAIL_EXISTS');
+
+    const list = (await req('/api/admin/students', { auth: admin })).data.students;
+    const x = list.find((y) => y.name === '小新');
+    assert.equal(x.source, 'self');
+    assert.equal(x.gender, 'M');
+    assert.equal(x.healthNotes, '氣喘，請準備吸入器');
+    assert.equal(x.consentPhoto, 'no');
+    assert.ok(x.consentPrivacyAt);
+    assert.equal(x.hasPassword, true);
+  });
+
+  test('密碼登入、錯誤密碼、變更密碼、幫家人新增學員', async () => {
+    assert.equal((await req('/api/login', { method: 'POST', body: { email: 'new@example.com', password: 'wrongpass' } })).status, 401);
+    const r = await req('/api/login', { method: 'POST', body: { email: 'NEW@example.com', password: 'longpass1' } });
+    assert.equal(r.status, 200);
+    const t = r.data.token;
+    assert.equal((await req('/api/my/password', { method: 'POST', auth: t, body: { current: 'nope', password: 'newpass12' } })).status, 401);
+    assert.equal((await req('/api/my/password', { method: 'POST', auth: t, body: { current: 'longpass1', password: 'newpass12' } })).status, 200);
+    assert.equal((await req('/api/login', { method: 'POST', body: { email: 'new@example.com', password: 'newpass12' } })).status, 200);
+    const add = await req('/api/my/students', { method: 'POST', auth: t, body: {
+      students: [kid('小白')], consentPrivacy: true, consentPhoto: 'yes' } });
+    assert.equal(add.status, 201);
+    assert.deepEqual(add.data.students.map((x) => x.name), ['小新', '小葵', '小白']);
+    assert.equal((await req('/api/my/students', { method: 'POST', auth: t, body: {
+      students: [kid('小白')], consentPrivacy: true, consentPhoto: 'yes' } })).status, 409);
+  });
+
+  test('舊生沒有密碼 → 忘記密碼寄信 → 設定密碼', async () => {
+    const id = (await req('/api/admin/students', { method: 'POST', auth: admin, body: { name: '老學員', email: 'old@example.com' } })).data.id;
+    const first = await req('/api/login', { method: 'POST', body: { email: 'old@example.com', password: 'whatever1' } });
+    assert.equal(first.status, 409);
+    assert.equal(first.data.code, 'NO_PASSWORD');
+
+    sent.length = 0;
+    const f = await req('/api/password/forgot', { method: 'POST', body: { email: 'old@example.com' } });
+    assert.equal(f.data.sent, true);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].to, 'old@example.com');
+    const link = /https?:\/\/\S+\/reset\?token=[\w-]+/.exec(sent[0].text)[0];
+    const token = new URL(link).searchParams.get('token');
+    // 沒註冊的信箱：回應一樣，但不寄信
+    assert.equal((await req('/api/password/forgot', { method: 'POST', body: { email: 'ghost@example.com' } })).data.sent, true);
+    assert.equal(sent.length, 1);
+
+    const info = await req(`/api/password/reset?token=${token}`);
+    assert.deepEqual(info.data.students, ['老學員']);
+    assert.equal((await req('/api/password/reset', { method: 'POST', body: { token, password: 'short' } })).status, 400);
+    const done = await req('/api/password/reset', { method: 'POST', body: { token, password: 'oldpass12' } });
+    assert.equal(done.status, 200);
+    assert.ok(done.data.token);
+    // 連結只能用一次
+    assert.equal((await req('/api/password/reset', { method: 'POST', body: { token, password: 'another12' } })).status, 410);
+    assert.equal((await req('/api/login', { method: 'POST', body: { email: 'old@example.com', password: 'oldpass12' } })).status, 200);
+
+    // 老師產生的連結也可以用，設定後舊的登入會被登出
+    const before = (await req('/api/login', { method: 'POST', body: { email: 'old@example.com', password: 'oldpass12' } })).data.token;
+    const url = (await req(`/api/admin/students/${id}/reset-link`, { method: 'POST', auth: admin })).data.url;
+    await req('/api/password/reset', { method: 'POST', body: { token: new URL(url).searchParams.get('token'), password: 'viaadmin1' } });
+    assert.equal((await req('/api/me', { auth: before })).status, 401);
+    assert.equal((await req('/api/login', { method: 'POST', body: { email: 'old@example.com', password: 'viaadmin1' } })).status, 200);
+  });
+
+  test('名單顯示身心狀況與攝影同意', async () => {
+    const d = today();
+    const slot = (await req('/api/admin/slots', { method: 'POST', auth: admin, body: {
+      title: '課', date: T.addDays(d, 2), time: '10:00', duration: 60, capacity: 5 } })).data.id;
+    const st = (await req('/api/admin/students', { auth: admin })).data.students.find((x) => x.name === '小新');
+    await req(`/api/admin/slots/${slot}/bookings`, { method: 'POST', auth: admin, body: { studentId: st.id } });
+    const b = (await req(`/api/admin/slots?from=${d}&to=${T.addDays(d, 5)}`, { auth: admin })).data.slots
+      .find((x) => x.id === slot).bookings[0];
+    assert.equal(b.healthNotes, '氣喘，請準備吸入器');
+    assert.equal(b.consentPhoto, 'no');
+    assert.equal((await req(`/api/admin/students/${st.id}/photo-consent`, { method: 'POST', auth: admin, body: { value: 'yes' } })).status, 200);
+  });
+});
+
+test('沒有設定寄信時，忘記密碼請學員聯絡老師', async () => {
+  const app = await start({ seedSchedule: false });
+  const r = await app.req('/api/password/forgot', { method: 'POST', body: { email: 'a@example.com' } });
+  assert.equal(r.data.sent, false);
+  app.server.close();
 });
 
 test('舊版資料庫（預約代碼）可以升級', () => {

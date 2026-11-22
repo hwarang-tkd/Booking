@@ -67,6 +67,9 @@
           <button type="button" data-f="nocredit">沒有堂數</button>
           <button type="button" data-f="expiring">7 天內到期／剩 1 堂</button>
           <button type="button" data-f="bday">本月壽星 🎂</button>
+          <button type="button" data-f="self">自行註冊</button>
+          <button type="button" data-f="health">身心狀況須留意</button>
+          <button type="button" data-f="nopw">尚未設定密碼</button>
           <button type="button" data-f="inactive">已停用</button>
         </div>
         <p class="muted" id="stCount" style="font-size:.9rem;margin:0 0 8px"></p>
@@ -185,6 +188,12 @@
           <label class="field">電話 <span class="hint">（選填）</span><input type="tel" name="phone" inputmode="tel"></label>
           <label class="field">生日 <span class="hint">（選填）</span><input type="date" name="birthday" min="1900-01-01"></label>
         </div>
+        <label class="field">性別
+          <select name="gender"><option value="">（未填）</option><option value="M">男</option><option value="F">女</option><option value="X">其他／不透露</option></select>
+        </label>
+        <label class="field">須留意的身心狀況 <span class="hint">（選填，上課名單會顯示給老師）</span>
+          <textarea name="healthNotes" maxlength="500"></textarea>
+        </label>
         <label class="field">老師備註 <span class="hint">（選填，學員看不到，例如：家長姓名、帶別、方案）</span>
           <textarea name="note" maxlength="300"></textarea>
         </label>
@@ -250,6 +259,20 @@
       </form>
     </div>
     <div class="dlg-foot"><button type="button" class="btn secondary" data-close>關閉</button></div>
+  </dialog>
+
+  <!-- 設定密碼連結 -->
+  <dialog id="linkDlg">
+    <div class="dlg-head"><h3>設定密碼連結</h3></div>
+    <div class="dlg-body stack">
+      <p style="margin:0" id="linkWho"></p>
+      <input type="text" id="linkUrl" readonly onclick="this.select()" style="font-size:.85rem">
+      <p class="muted" style="font-size:.88rem;margin:0" id="linkHint"></p>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn secondary" data-close>關閉</button>
+      <button type="button" class="btn" id="linkCopy">複製連結</button>
+    </div>
   </dialog>
 
   <!-- 學員預約紀錄 -->

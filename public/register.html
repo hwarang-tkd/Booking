@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>新生註冊</title>
+  <link rel="icon" href="/logo.png" type="image/png">
+  <meta name="theme-color" content="#d4959a">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/"><img src="/logo.png" alt=""><span data-school>花郎武道館</span></a>
+      <nav class="nav" data-student>
+        <a href="/">預約課程</a>
+        <a href="/info">課表與收費</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1 id="heading">新生註冊</h1>
+    <p class="sub" id="intro">填好資料後就能登入約課。兄弟姊妹可以用同一個信箱一起註冊。未滿 18 歲的學員請由家長填寫。</p>
+    <div id="loggedIn" class="callout hidden" style="margin-bottom:16px"></div>
+
+    <form id="form" class="stack" novalidate>
+      <section class="card stack" id="accountBox">
+        <h2 style="margin:0">登入帳號</h2>
+        <label class="field">電子信箱 <span class="hint">（之後用來登入）</span>
+          <input type="email" name="email" required autocomplete="username" inputmode="email" placeholder="name@example.com">
+        </label>
+        <div class="row">
+          <label class="field">密碼 <span class="hint">（至少 8 個字元）</span>
+            <input type="password" name="password" required minlength="8" autocomplete="new-password">
+          </label>
+          <label class="field">再輸入一次
+            <input type="password" name="password2" required minlength="8" autocomplete="new-password">
+          </label>
+        </div>
+      </section>
+
+      <div id="students" class="stack"></div>
+      <button type="button" class="btn secondary" id="addKid">＋ 再新增一位學員（兄弟姊妹）</button>
+
+      <section class="card stack">
+        <h2 style="margin:0">個人資料蒐集、處理及利用同意書</h2>
+        <div class="consent" id="privacyText" data-noi18n></div>
+        <label class="check"><input type="checkbox" name="consentPrivacy">
+          <span><b>我已閱讀並同意</b>上述個人資料蒐集、處理及利用同意書（未滿 18 歲學員由法定代理人同意）</span></label>
+      </section>
+
+      <section class="card stack">
+        <h2 style="margin:0">攝影使用同意書</h2>
+        <div class="consent" id="photoText" data-noi18n></div>
+        <div class="stack" style="gap:6px">
+          <label class="check"><input type="radio" name="consentPhoto" value="yes"><span><b>同意</b>將學員於課程與活動中的照片、影片用於上述用途</span></label>
+          <label class="check"><input type="radio" name="consentPhoto" value="no"><span><b>不同意</b>（本館將避免公開使用可辨識學員的影像）</span></label>
+        </div>
+      </section>
+
+      <div id="msg" class="hidden"></div>
+      <button class="btn block" type="submit" id="submit">送出註冊</button>
+      <p class="muted" style="text-align:center;font-size:.9rem;margin:0" id="haveAccount">已經有帳號？<a href="/my">登入</a></p>
+    </form>
+  </main>
+
+  <footer class="site"></footer>
+  <script src="/i18n.js"></script>
+  <script src="/common.js"></script>
+  <script src="/register.js"></script>
+</body>
+</html>

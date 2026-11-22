@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { openDb, createStore, passStatus } = require('./lib/db');
+const { createMailer, resetPasswordMail } = require('./lib/mail');
 const { CATEGORIES, CATEGORY_IDS, DEFAULT_TEMPLATES } = require('./lib/schedule');
 const T = require('./lib/time');
 
@@ -12,7 +13,11 @@ const ENV_FILE = path.join(__dirname, '.env');
 if (require.main === module && fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE);
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const PAGES = { '/': '/index.html', '/my': '/my.html', '/info': '/info.html', '/admin': '/admin.html' };
+const PAGES = {
+  '/': '/index.html', '/my': '/my.html', '/info': '/info.html', '/admin': '/admin.html',
+  '/register': '/register.html', '/forgot': '/forgot.html', '/reset': '/reset.html',
+};
+const CONSENT_VERSION = '2026-11';
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -37,12 +42,28 @@ function loadConfig(env = process.env) {
     bookCutoffMinutes: num(env.BOOK_CUTOFF_MINUTES, 0),
     bookAheadDays: num(env.BOOK_AHEAD_DAYS, 28) || 28,
     seedSchedule: env.SEED_SCHEDULE !== '0',
+    publicUrl: (env.PUBLIC_URL || '').replace(/\/+$/, ''),  // 例如 https://booking.hwarang-tkd-tw.com（寄信連結用）
+    resendApiKey: env.RESEND_API_KEY || '',
+    mailFrom: env.MAIL_FROM || '',                            // 例如 花郎武道館 <no-reply@hwarang-tkd-tw.com>
     requirePass: env.REQUIRE_PASS !== '0', // 學員自己約課時需要有可用堂數
   };
 }
 
 class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  constructor(status, message, code) { super(message); this.status = status; this.code = code; }
+}
+
+// 密碼雜湊：scrypt，格式 scrypt$鹽$雜湊
+function hashPassword(pw) {
+  const salt = crypto.randomBytes(16);
+  return `scrypt$${salt.toString('base64')}$${crypto.scryptSync(pw, salt, 64).toString('base64')}`;
+}
+function verifyPassword(pw, stored) {
+  const [kind, salt, hash] = String(stored || '').split('$');
+  if (kind !== 'scrypt' || !salt || !hash) return false;
+  const expected = Buffer.from(hash, 'base64');
+  const actual = crypto.scryptSync(String(pw), Buffer.from(salt, 'base64'), expected.length);
+  return crypto.timingSafeEqual(actual, expected);
 }
 
 const str = (v, max, field, { required = true } = {}) => {
@@ -73,6 +94,7 @@ const category = (v) => (CATEGORY_IDS.includes(v) ? v : 'other');
 function createApp(cfg) {
   const db = openDb(cfg.dbPath);
   const store = createStore(db);
+  const mailer = cfg.mailer || createMailer({ apiKey: cfg.resendApiKey, from: cfg.mailFrom });
   if (cfg.seedSchedule && store.isEmpty()) store.createTemplates(DEFAULT_TEMPLATES);
 
   const ADMIN_SESSION_MS = 12 * 3600 * 1000;
@@ -190,6 +212,7 @@ function createApp(cfg) {
     };
   }
   const publicStudent = (st) => ({ id: st.id, name: st.name, email: st.email, phone: st.phone });
+  const GENDERS = ['M', 'F', 'X'];
   function parseStudent(b) {
     return {
       name: str(b.name, 40, '姓名'),
@@ -197,8 +220,40 @@ function createApp(cfg) {
       phone: normPhone(b.phone),
       note: str(b.note, 300, '備註', { required: false }),
       birthday: parseBirthday(b.birthday),
+      gender: GENDERS.includes(b.gender) ? b.gender : '',
+      healthNotes: str(b.healthNotes, 500, '須留意的身心狀況', { required: false }),
     };
   }
+  function parsePassword(v) {
+    const pw = typeof v === 'string' ? v : '';
+    if (pw.length < 8) throw new HttpError(400, '密碼至少需要 8 個字元');
+    if (pw.length > 200) throw new HttpError(400, '密碼太長');
+    return pw;
+  }
+  /** 自行註冊的學員資料：姓名、性別、生日必填；身心狀況選填。 */
+  function parseRegistrant(b, email, consent) {
+    const name = str(b && b.name, 40, '姓名');
+    if (!GENDERS.includes(b.gender)) throw new HttpError(400, `請選擇${name}的性別`);
+    const birthday = parseBirthday(b.birthday);
+    if (!birthday) throw new HttpError(400, `請填寫${name}的生日`);
+    return {
+      name, email, birthday, gender: b.gender, phone: normPhone(b.phone),
+      healthNotes: str(b.healthNotes, 500, '須留意的身心狀況', { required: false }), note: '', source: 'self', ...consent,
+    };
+  }
+  /** 同意書：個資蒐集必須同意；攝影使用需選擇同意或不同意。 */
+  function parseConsent(b) {
+    if (b.consentPrivacy !== true) throw new HttpError(400, '請閱讀並同意個人資料蒐集同意書');
+    if (!['yes', 'no'].includes(b.consentPhoto)) throw new HttpError(400, '請選擇是否同意攝影使用');
+    return { consentPrivacyAt: now(), consentPhoto: b.consentPhoto, consentVersion: CONSENT_VERSION };
+  }
+  const baseUrl = (req) => cfg.publicUrl
+    || `${req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'}://${req.headers.host}`;
+  const RESET_HOURS = 24, ADMIN_RESET_DAYS = 7;
+  const loginResult = (family) => ({
+    token: store.createSession('student', family[0].id, STUDENT_SESSION_MS),
+    students: family.map(publicStudent),
+  });
   function parseBirthday(v) {
     const raw = String(v ?? '').trim();
     if (!raw) return '';
@@ -251,18 +306,101 @@ function createApp(cfg) {
     };
   });
 
-  // 學員用信箱登入（信箱需由老師在後台建立）
+  // 學員用信箱＋密碼登入
   route('POST', /^\/api\/login$/, (req, url, body) => {
     checkThrottle(req);
     const email = normEmail(body.email);
     const all = store.studentsByEmail(email);
-    if (!all.length) { recordFail(req, 10); throw new HttpError(404, '找不到這個信箱的學員資料，請確認信箱或聯絡老師'); }
+    if (!all.length) { recordFail(req, 10); throw new HttpError(401, '信箱或密碼錯誤'); }
+    const account = store.getAccount(email);
+    if (!account) {
+      throw new HttpError(409, '這個信箱還沒有設定密碼，請按「忘記密碼」用信箱設定密碼', 'NO_PASSWORD');
+    }
+    if (!verifyPassword(body.password, account.password_hash)) { recordFail(req, 10); throw new HttpError(401, '信箱或密碼錯誤'); }
     const family = all.filter((x) => x.active);
     if (!family.length) throw new HttpError(403, '這個帳號目前已停用，請聯絡老師');
-    return {
-      token: store.createSession('student', family[0].id, STUDENT_SESSION_MS),
-      students: family.map(publicStudent),
-    };
+    return loginResult(family);
+  });
+
+  // 新生註冊：一次可登記多位學員（例如兄弟姊妹），註冊後自動登入
+  route('POST', /^\/api\/register$/, (req, url, body) => {
+    checkThrottle(req);
+    const email = normEmail(body.email);
+    const password = parsePassword(body.password);
+    if (store.studentsByEmail(email).length) {
+      throw new HttpError(409, '這個信箱已經註冊過了，請直接登入（忘記密碼可以重設）', 'EMAIL_EXISTS');
+    }
+    const consent = parseConsent(body);
+    const list = Array.isArray(body.students) ? body.students : [];
+    if (!list.length || list.length > 10) throw new HttpError(400, '請填寫學員資料');
+    const items = list.map((x) => parseRegistrant(x, email, consent));
+    store.setPassword(email, hashPassword(password));
+    store.registerStudents(items);
+    return { status: 201, body: loginResult(store.studentsByEmail(email).filter((x) => x.active)) };
+  });
+
+  // 已登入的家長幫家人（例如弟弟妹妹）新增學員資料
+  route('POST', /^\/api\/my\/students$/, (req, url, body) => {
+    const family = currentFamily(req);
+    const email = family[0].email;
+    const consent = parseConsent(body);
+    const list = Array.isArray(body.students) ? body.students : [];
+    if (!list.length || list.length > 10) throw new HttpError(400, '請填寫學員資料');
+    const items = list.map((x) => parseRegistrant(x, email, consent));
+    for (const it of items) {
+      if (store.findStudent(email, it.name)) throw new HttpError(409, `已經有學員「${it.name}」了`);
+    }
+    store.registerStudents(items);
+    return { status: 201, body: { students: store.studentsByEmail(email).filter((x) => x.active).map(publicStudent) } };
+  });
+
+  // 忘記密碼：寄出設定密碼連結（舊生第一次設定密碼也用這個）
+  route('POST', /^\/api\/password\/forgot$/, async (req, url, body) => {
+    checkThrottle(req);
+    const email = normEmail(body.email);
+    const family = store.studentsByEmail(email).filter((x) => x.active);
+    if (!mailer.enabled) {
+      return { ok: true, sent: false, message: '網站目前無法寄信，請聯絡老師取得設定密碼的連結' };
+    }
+    recordFail(req, 10); // 限制頻率，避免被拿來大量寄信
+    if (family.length) {
+      const link = `${baseUrl(req)}/reset?token=${store.createReset(email, RESET_HOURS * 3600e3)}`;
+      try {
+        await mailer.send({ to: email, ...resetPasswordMail({
+          school: cfg.schoolName, schoolEn: cfg.schoolNameEn, names: family.map((x) => x.name), link, hours: RESET_HOURS,
+        }) });
+      } catch (e) {
+        console.error('寄信失敗', e.message);
+        throw new HttpError(502, '寄信失敗，請稍後再試或聯絡老師');
+      }
+    }
+    // 不透露這個信箱有沒有註冊
+    return { ok: true, sent: true };
+  });
+
+  route('GET', /^\/api\/password\/reset$/, (req, url) => {
+    const email = store.checkReset(url.searchParams.get('token'));
+    if (!email) throw new HttpError(410, '這個連結已失效或已使用過，請重新申請');
+    return { email, students: store.studentsByEmail(email).filter((x) => x.active).map((x) => x.name) };
+  });
+
+  route('POST', /^\/api\/password\/reset$/, (req, url, body) => {
+    const email = store.checkReset(body.token);
+    if (!email) throw new HttpError(410, '這個連結已失效或已使用過，請重新申請');
+    const password = parsePassword(body.password);
+    store.resetPassword(email, hashPassword(password));
+    const family = store.studentsByEmail(email).filter((x) => x.active);
+    if (!family.length) throw new HttpError(403, '這個帳號目前已停用，請聯絡老師');
+    return loginResult(family);
+  });
+
+  route('POST', /^\/api\/my\/password$/, (req, url, body) => {
+    const family = currentFamily(req);
+    const email = family[0].email;
+    const account = store.getAccount(email);
+    if (account && !verifyPassword(body.current, account.password_hash)) throw new HttpError(401, '目前的密碼不正確');
+    store.setPassword(email, hashPassword(parsePassword(body.password)));
+    return { ok: true };
   });
 
   route('POST', /^\/api\/logout$/, (req) => {
@@ -349,6 +487,22 @@ function createApp(cfg) {
   });
 
   // ----- 學員資料 -----
+  // 產生設定／重設密碼連結（老師用 LINE 等方式傳給學員）
+  route('POST', /^\/api\/admin\/students\/(\d+)\/reset-link$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const st = store.getStudent(Number(id));
+    if (!st) throw new HttpError(404, '找不到這位學員');
+    const token = store.createReset(st.email, ADMIN_RESET_DAYS * 86400e3);
+    return { url: `${baseUrl(req)}/reset?token=${token}`, days: ADMIN_RESET_DAYS, email: st.email };
+  });
+
+  route('POST', /^\/api\/admin\/students\/(\d+)\/photo-consent$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    if (!['yes', 'no', ''].includes(body.value)) throw new HttpError(400, '資料格式錯誤');
+    if (!store.setPhotoConsent(Number(id), body.value)) throw new HttpError(404, '找不到這位學員');
+    return { ok: true };
+  });
+
   route('GET', /^\/api\/admin\/students$/, (req) => {
     requireAdmin(req);
     const summary = store.passSummary(today());
@@ -356,6 +510,8 @@ function createApp(cfg) {
       students: store.listStudents(now()).map((st) => ({
         credits: summary[st.id] || { remaining: 0, nextExpiry: null, future: 0 },
         ...publicStudent(st), note: st.note, birthday: st.birthday, active: !!st.active, createdAt: st.created_at, lastLogin: st.last_login,
+        gender: st.gender, healthNotes: st.health_notes, consentPrivacyAt: st.consent_privacy_at, consentPhoto: st.consent_photo,
+        source: st.source, hasPassword: !!store.getAccount(st.email),
         upcoming: st.upcoming, attended: st.attended, lastClass: st.last_class,
       })),
     };
@@ -494,6 +650,7 @@ function createApp(cfg) {
           trial: !!b.trial, bookedBy: b.booked_by, status: b.status, createdAt: b.created_at,
           passId: b.pass_id, passName: b.pass_name,
           birthdayToday: !!b.birthday && b.birthday.slice(5) === s.start_at.slice(5, 10),
+          healthNotes: b.health_notes, consentPhoto: b.consent_photo,
         })),
       })),
     };
@@ -640,13 +797,13 @@ function createApp(cfg) {
         if (r.method !== req.method) continue;
         const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
         if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, '資料格式錯誤');
-        const out = r.handler(req, url, body, m);
+        const out = await r.handler(req, url, body, m);
         if (out && out.status) return send(res, out.status, out.body);
         return send(res, 200, out);
       }
       throw new HttpError(matchedPath ? 405 : 404, matchedPath ? 'Method Not Allowed' : '找不到這個 API');
     } catch (e) {
-      if (e instanceof HttpError) return send(res, e.status, { error: e.message });
+      if (e instanceof HttpError) return send(res, e.status, { error: e.message, ...(e.code ? { code: e.code } : {}) });
       console.error(e);
       return send(res, 500, { error: '伺服器發生錯誤，請稍後再試' });
     }

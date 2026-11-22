@@ -11,6 +11,7 @@
     $('list').innerHTML = `<div class="alert error">${esc(e.message)}</div>`;
     return;
   }
+  if (!auth.token) $('newbie').classList.remove('hidden');
   $('intro').textContent = `點選日期，查看當天可預約的課程。開放預約未來 ${cfg.bookAheadDays} 天內的課程` +
     (cfg.cancelHours > 0 ? `，上課前 ${cfg.cancelHours} 小時內無法線上取消。` : '。');
 

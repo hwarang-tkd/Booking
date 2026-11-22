@@ -145,6 +145,47 @@ const EN = {
   '王小明, ming@example.com, 0912345678 陳小華, hua@example.com': 'Ming Wang, ming@example.com, 0912345678\nHua Chen, hua@example.com',
   '例如：跆拳道': 'e.g. 跆拳道', '12歲以上': '12歲以上', 'Taekwon-Do・12歲以上': 'Taekwon-Do · Age 12+',
 
+  // 密碼、註冊
+  '密碼': 'Password', '忘記密碼？／舊生第一次設定密碼': 'Forgot password? / Set up a password', '新生註冊 →': 'New student? Register →',
+  '用信箱設定密碼 →': 'Set a password by email →', '設定密碼': 'Set Password', '忘記密碼／舊生設定密碼': 'Forgot / Set Up Password',
+  '輸入你登記的信箱，我們會寄一封「設定密碼」的信給你。': 'Enter your registered email and we\'ll send you a link to set your password.',
+  '寄送設定密碼連結': 'Send link', '收不到信？請檢查垃圾郵件匣，或直接聯絡老師幫你產生設定密碼的連結。':
+    'No email? Check your spam folder, or ask your instructor for a password link.',
+  '網站目前無法寄信，請聯絡老師取得設定密碼的連結': 'This site can\'t send email right now. Please ask your instructor for a password link.',
+  '性別': 'Gender', '新密碼': 'New password', '（至少 8 個字元）': '(at least 8 characters)', '再輸入一次': 'Confirm password',
+  '設定密碼並登入': 'Set password & log in', '重新申請': 'Request a new link', '兩次輸入的密碼不一樣': 'The passwords don\'t match',
+  '密碼已設定，已幫你登入': 'Password set — you\'re logged in', '這個連結已失效或已使用過，請重新申請': 'This link has expired or was already used. Please request a new one.',
+  '信箱：': 'Email: ',
+  '新生註冊': 'New Student Registration', '填好資料後就能登入約課。兄弟姊妹可以用同一個信箱一起註冊。未滿 18 歲的學員請由家長填寫。':
+    'Fill in the form and you can start booking. Siblings can register together with one email. Parents please fill in for students under 18.',
+  '登入帳號': 'Login', '（之後用來登入）': '(used to log in)', '＋ 再新增一位學員（兄弟姊妹）': '+ Add another student (sibling)',
+  '個人資料蒐集、處理及利用同意書': 'Personal Data Consent', '我已閱讀並同意': 'I have read and agree',
+  '上述個人資料蒐集、處理及利用同意書（未滿 18 歲學員由法定代理人同意）': ' to the personal data consent above (a parent/guardian agrees for students under 18)',
+  '攝影使用同意書': 'Photo & Video Consent', '同意': 'I agree', '將學員於課程與活動中的照片、影片用於上述用途': ' to the use of photos/videos of the student as described above',
+  '不同意': 'I do not agree', '（本館將避免公開使用可辨識學員的影像）': ' (we will avoid publishing images where the student can be identified)',
+  '送出註冊': 'Register', '已經有帳號？': 'Already have an account? ', '新增家人': 'Add Family Member', '新增家人 →': 'Add family member →',
+  '學員基本資料': 'Student', '移除': 'Remove', '學員姓名': 'Student name', '男': 'Male', '女': 'Female', '其他／不透露': 'Other / prefer not to say',
+  '須留意的身心狀況': 'Health or other conditions to be aware of',
+  '例如：氣喘、過敏、心臟疾病、癲癇、近期受傷或開刀、需要協助的情緒或專注狀況…沒有可以留空':
+    'e.g. asthma, allergies, heart condition, epilepsy, recent injury or surgery, emotional or attention needs… leave blank if none',
+  '密碼至少需要 8 個字元': 'Password must be at least 8 characters', '請閱讀並同意個人資料蒐集同意書': 'Please read and agree to the personal data consent',
+  '請選擇是否同意攝影使用': 'Please choose whether you agree to photo/video use', '已新增學員': 'Student added',
+  '註冊完成，歡迎！': 'Registration complete — welcome!', '去登入': 'Log in', '忘記密碼': 'Forgot password',
+  '用你的信箱和密碼登入，查看和取消預約。': 'Log in with your email and password to see and cancel bookings.',
+  '帳號設定': 'Account', '＋ 新增家人（兄弟姊妹）': '+ Add family member (sibling)', '變更密碼': 'Change password',
+  '目前的密碼': 'Current password', '密碼已變更': 'Password changed', '第一次來？請先': 'First time here? Please',
+  // 後台：學員資料新欄位
+  '（未填）': '(not set)', '其他': 'Other', '（選填，上課名單會顯示給老師）': '(optional, shown to instructors on the class roster)',
+  '自行註冊': 'Self-registered', '身心狀況須留意': 'Health notes', '尚未設定密碼': 'No password yet', '設定密碼連結': 'Password Link',
+  '複製連結': 'Copy link', '已複製連結': 'Link copied', '密碼連結': 'Password link', '📷✗ 不拍照': '📷✗ No photos',
+  '不同意攝影使用': 'Does not consent to photos', '📷 不同意攝影': '📷 No photo consent', '📷 同意攝影': '📷 Photo consent',
+  '🔑 尚未設定密碼': '🔑 No password yet', '把這個連結傳給': 'Send this link to',
+  '信箱或密碼錯誤': 'Wrong email or password', '這個信箱還沒有設定密碼，請按「忘記密碼」用信箱設定密碼':
+    'This email has no password yet. Use "Forgot password" to set one by email.',
+  '這個信箱已經註冊過了，請直接登入（忘記密碼可以重設）': 'This email is already registered. Please log in (you can reset a forgotten password).',
+  '請填寫學員資料': 'Please fill in the student details', '寄信失敗，請稍後再試或聯絡老師': 'Couldn\'t send the email. Please try again later or contact your instructor.',
+  '目前的密碼不正確': 'Current password is incorrect', '密碼太長': 'Password is too long',
+
   // 伺服器訊息
   '找不到這堂課': 'Class not found', '這堂課已停課': 'This class has been cancelled',
   '這堂課已經開始或已截止預約': 'This class has started or booking has closed', '這堂課已額滿': 'This class is full',
@@ -261,6 +302,18 @@ const PATTERNS = [
   ['信箱 {} 底下已經有同名學員「{}」', (e, n) => `${e} already has a student named "${n}"`], ['重複：{}', (x) => `Duplicate: ${x}`],
   ['👤 {}・{}', (n, p) => `👤 ${n} · ${p}`],
 
+  // 密碼、註冊（含變數）
+  ['如果 {} 有註冊，設定密碼的信已經寄出，請在 24 小時內點信中的連結。', (e) => `If ${e} is registered, we've sent an email. Please use the link within 24 hours.`],
+  ['學員：{}', (n) => `Students: ${n}`],
+  ['幫同一個帳號（{}）新增學員，例如弟弟妹妹。新增後就能幫他們約課。', (e) => `Add another student (e.g. a sibling) to this account (${e}). You can then book classes for them.`],
+  ['你已經登入（{}）。要幫家人新增學員嗎？', (n) => `You're logged in (${n}). Want to add a family member?`],
+  ['請填寫第 {} 位學員的姓名、性別和生日', (n) => `Please fill in the name, gender and birthday of student ${n}`],
+  ['已經有學員「{}」了', (n) => `"${n}" is already on this account`], ['請選擇{}的性別', (n) => `Please choose ${n}'s gender`],
+  ['請填寫{}的生日', (n) => `Please enter ${n}'s birthday`],
+  ['⚠️ 須留意：{}', (n) => `⚠️ Note: ${n}`], ['自行註冊 {}', (d) => `Self-registered ${d}`],
+  ['（{}），點開就能設定密碼：', (e) => ` (${e}). Opening it lets them set a password:`],
+  ['{} 天內有效，只能使用一次。同一個信箱的家人共用這組密碼。', (n) => `Valid for ${n} days, single use. Family members on the same email share this password.`],
+
   // 後台：固定課表
   ['{}・名額 {}', (s, n) => `${s} · capacity ${n}`], ['名額 {}', (n) => `Capacity ${n}`],
   ['從固定課表刪除「{} {} {}」？', (d, t, c) => `Remove "${c}" (${d} ${t}) from the weekly schedule?`],
@@ -275,7 +328,7 @@ const CJK = /[㐀-鿿！-｠、-〿]/;
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
 const literal = (k) => k.replace(/\{\}/g, '').length;
 const COMPILED = [...PATTERNS].sort((a, b) => literal(b[0]) - literal(a[0])).map(([k, fn]) => {
-  const re = new RegExp('^' + k.split('{}').map((p) => p.replace(/[.*+?^$()|[\]\\]/g, '\\$&')).join('(.+?)') + '$');
+  const re = new RegExp('^' + k.split('{}').map((p) => p.replace(/[.*+?^$()|[\]\\]/g, '\\$&')).join('([^・]+?)') + '$'); // 變數不跨「・」分隔的段落
   return [re, fn];
 });
 const cache = new Map();

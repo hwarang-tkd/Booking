@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>設定密碼</title>
+  <link rel="icon" href="/logo.png" type="image/png">
+  <meta name="theme-color" content="#d4959a">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/"><img src="/logo.png" alt=""><span data-school>花郎武道館</span></a>
+      <nav class="nav" data-student>
+        <a href="/">預約課程</a>
+        <a href="/info">課表與收費</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>設定密碼</h1>
+    <div id="bad" class="alert error hidden"></div>
+    <form id="form" class="card stack hidden" style="max-width:440px">
+      <div class="summary" id="who"></div>
+      <input type="email" name="username" autocomplete="username" class="hidden" aria-hidden="true" tabindex="-1">
+      <label class="field">新密碼 <span class="hint">（至少 8 個字元）</span>
+        <input type="password" name="password" required minlength="8" autocomplete="new-password">
+      </label>
+      <label class="field">再輸入一次
+        <input type="password" name="password2" required minlength="8" autocomplete="new-password">
+      </label>
+      <div id="msg" class="hidden"></div>
+      <button class="btn block" type="submit">設定密碼並登入</button>
+    </form>
+  </main>
+
+  <footer class="site"></footer>
+  <script src="/i18n.js"></script>
+  <script src="/common.js"></script>
+  <script>
+    (async () => {
+      applyConfig().catch(() => {});
+      const $ = (id) => document.getElementById(id);
+      const token = new URLSearchParams(location.search).get('token') || '';
+      const f = $('form');
+      try {
+        const info = await api('/api/password/reset?token=' + encodeURIComponent(token));
+        $('who').innerHTML = `信箱：<b>${esc(info.email)}</b><br>學員：${info.students.map(esc).join('、')}`;
+        f.username.value = info.email;
+        f.classList.remove('hidden');
+        f.password.focus();
+      } catch (e) {
+        $('bad').innerHTML = `${esc(e.message)}<br><a class="btn small" style="margin-top:8px" href="/forgot">重新申請</a>`;
+        $('bad').classList.remove('hidden');
+        return;
+      }
+      f.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        if (f.password.value !== f.password2.value) return showError($('msg'), '兩次輸入的密碼不一樣');
+        try {
+          const r = await api('/api/password/reset', { method: 'POST', body: { token, password: f.password.value } });
+          auth.save(r.token, r.students);
+          toast('密碼已設定，已幫你登入');
+          setTimeout(() => { location.href = '/my'; }, 800);
+        } catch (e) { showError($('msg'), e.message); }
+      });
+    })();
+  </script>
+</body>
+</html>

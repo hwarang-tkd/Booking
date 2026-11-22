@@ -12,7 +12,7 @@ async function api(path, { method = 'GET', body, token } = {}) {
     throw Object.assign(new Error('網路連線失敗，請稍後再試'), { status: 0 });
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || '發生錯誤'), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data.error || '發生錯誤'), { status: res.status, code: data.code });
   return data;
 }
 
@@ -114,21 +114,37 @@ async function sapi(path, opts = {}) {
 function loginFormHtml(id) {
   return `
     <label class="field">電子信箱
-      <input type="email" name="email" required autocomplete="email" inputmode="email" placeholder="name@example.com">
+      <input type="email" name="email" required autocomplete="username" inputmode="email" placeholder="name@example.com">
     </label>
-    <p class="muted" style="font-size:.88rem;margin:0">請輸入老師幫你建立學員資料時登記的信箱。還沒有資料的話，請先聯絡老師。</p>
-    <div id="${id}" class="hidden"></div>`;
+    <label class="field">密碼
+      <input type="password" name="password" required autocomplete="current-password" minlength="1">
+    </label>
+    <div id="${id}" class="hidden"></div>
+    <p style="font-size:.9rem;margin:0;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <a href="/forgot" data-forgot>忘記密碼？／舊生第一次設定密碼</a>
+      <a href="/register"><b>新生註冊 →</b></a>
+    </p>`;
 }
 
 async function doLogin(form, errEl) {
   const btn = form.querySelector('[type=submit]');
   btn.disabled = true;
   try {
-    const r = await api('/api/login', { method: 'POST', body: { email: form.email.value } });
+    const r = await api('/api/login', { method: 'POST', body: { email: form.email.value, password: form.password.value } });
     auth.save(r.token, r.students);
     return r.students;
   } catch (e) {
     showError(errEl, e.message);
+    if (e.code === 'NO_PASSWORD') {
+      // 舊生還沒設定密碼：直接帶去設定
+      const a = document.createElement('a');
+      a.href = '/forgot?email=' + encodeURIComponent(form.email.value.trim());
+      a.className = 'btn small';
+      a.style.marginTop = '8px';
+      a.textContent = '用信箱設定密碼 →';
+      errEl.appendChild(document.createElement('br'));
+      errEl.appendChild(a);
+    }
     return null;
   } finally {
     btn.disabled = false;
@@ -158,6 +174,9 @@ function loginDialog(message) {
   msg.classList.toggle('hidden', !message);
   dlg.querySelector('#loginDlgErr').classList.add('hidden');
   form.reset();
+  form.querySelector('[data-forgot]').onclick = (ev) => {
+    if (form.email.value) ev.currentTarget.href = '/forgot?email=' + encodeURIComponent(form.email.value.trim());
+  };
   return new Promise((resolve) => {
     form.onsubmit = async (ev) => {
       ev.preventDefault();

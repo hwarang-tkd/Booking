@@ -289,3 +289,12 @@ footer.site {
   .lang-switch { position: absolute; top: 18px; right: 12px; }
   .topbar-inner { position: relative; }
 }
+
+/* ---------- 註冊／同意書 ---------- */
+.consent {
+  max-height: 240px; overflow-y: auto; background: var(--surface-2); border-radius: 10px; padding: 4px 14px;
+  font-size: .9rem; line-height: 1.65;
+}
+.consent ol { padding-left: 1.3em; margin: 6px 0 10px; }
+.consent li { margin-bottom: 4px; }
+.health { color: var(--danger); font-size: .85rem; }
