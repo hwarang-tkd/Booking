@@ -468,6 +468,11 @@ function createApp(cfg) {
   }
 
   async function handle(req, res) {
+    // 在 Railway 等平台後面時，用 http 進來的一律轉到 https
+    if (req.headers['x-forwarded-proto'] === 'http' && req.headers.host) {
+      res.writeHead(301, { Location: `https://${req.headers.host}${req.url}` });
+      return res.end();
+    }
     const url = new URL(req.url, 'http://localhost');
     try {
       if (!url.pathname.startsWith('/api/')) {

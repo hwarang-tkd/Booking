@@ -46,8 +46,8 @@ describe('預設課表', () => {
 });
 
 describe('API', () => {
-  let req, server, token;
-  before(async () => { ({ req, server } = await start({ seedSchedule: false })); });
+  let req, server, base, token;
+  before(async () => { ({ req, server, base } = await start({ seedSchedule: false })); });
   after(() => server.close());
 
   test('後台需要登入', async () => {
@@ -218,6 +218,14 @@ describe('API', () => {
     assert.equal(del.status, 200);
     assert.equal(del.data.kept, 1);
     assert.equal((await req('/api/slots?days=29')).data.slots.filter((x) => x.title === '兒童班').length, 1);
+  });
+
+  test('經由平台用 http 進來會轉到 https', async () => {
+    const r = await fetch(base + '/my?x=1', { redirect: 'manual', headers: { 'X-Forwarded-Proto': 'http' } });
+    assert.equal(r.status, 301);
+    assert.equal(r.headers.get('location'), base.replace('http://', 'https://') + '/my?x=1');
+    const ok = await fetch(base + '/', { redirect: 'manual', headers: { 'X-Forwarded-Proto': 'https' } });
+    assert.equal(ok.status, 200);
   });
 
   test('靜態頁面與路徑安全', async () => {
