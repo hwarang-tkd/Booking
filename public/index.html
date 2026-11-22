@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>預約課程</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand" data-school>約課系統</div>
+      <nav class="nav">
+        <a href="/" aria-current="page">預約課程</a>
+        <a href="/my">我的預約</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>選擇上課時間</h1>
+    <p class="sub" id="intro">點選日期，查看當天可預約的課程。</p>
+
+    <div class="datestrip" id="dates" role="group" aria-label="選擇日期"></div>
+    <div id="list" class="stack" aria-live="polite"><div class="empty">載入中…</div></div>
+  </main>
+
+  <!-- 預約表單 -->
+  <dialog id="bookDlg">
+    <form id="bookForm" method="dialog">
+      <div class="dlg-head"><h3>預約課程</h3></div>
+      <div class="dlg-body stack">
+        <div class="summary" id="bookSummary"></div>
+        <label class="field">學生姓名
+          <input type="text" name="name" maxlength="40" required autocomplete="name">
+        </label>
+        <label class="field">聯絡電話 <span class="hint">（查詢、取消預約時使用）</span>
+          <input type="tel" name="phone" required inputmode="tel" autocomplete="tel" placeholder="0912345678">
+        </label>
+        <label class="field">備註 <span class="hint">（選填）</span>
+          <textarea name="note" maxlength="200" placeholder="例如：第一次上課、需要借道服…"></textarea>
+        </label>
+        <div id="bookErr" class="hidden"></div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="btn secondary" data-close>取消</button>
+        <button type="submit" class="btn" id="bookBtn">確認預約</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 預約成功 -->
+  <dialog id="doneDlg">
+    <div class="dlg-head"><h3>🎉 預約成功！</h3></div>
+    <div class="dlg-body">
+      <div class="summary" id="doneSummary"></div>
+      <p style="margin:14px 0 0">你的預約代碼（取消預約時需要，建議截圖保存）：</p>
+      <div class="code-box" id="doneCode"></div>
+      <p class="muted" style="margin:0;font-size:.9rem" id="doneHint"></p>
+    </div>
+    <div class="dlg-foot">
+      <a class="btn secondary" href="/my">查看我的預約</a>
+      <button type="button" class="btn" data-close>完成</button>
+    </div>
+  </dialog>
+
+  <script src="/common.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

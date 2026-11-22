@@ -1,0 +1,15 @@
+{
+  "name": "class-booking",
+  "version": "1.0.0",
+  "description": "學生線上約課系統（零外部套件）",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我的預約</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand" data-school>約課系統</div>
+      <nav class="nav">
+        <a href="/">預約課程</a>
+        <a href="/my" aria-current="page">我的預約</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>我的預約</h1>
+    <p class="sub">輸入預約時填寫的電話，查詢接下來的課程。</p>
+
+    <form id="lookup" class="card" style="display:flex;gap:10px;align-items:flex-end">
+      <label class="field" style="flex:1">聯絡電話
+        <input type="tel" name="phone" required inputmode="tel" autocomplete="tel" placeholder="0912345678">
+      </label>
+      <button class="btn" type="submit">查詢</button>
+    </form>
+
+    <div id="result" class="stack" style="margin-top:16px" aria-live="polite"></div>
+  </main>
+
+  <dialog id="cancelDlg">
+    <form id="cancelForm" method="dialog">
+      <div class="dlg-head"><h3>取消預約</h3></div>
+      <div class="dlg-body stack">
+        <div class="summary" id="cancelSummary"></div>
+        <label class="field">預約代碼 <span class="hint">（預約成功時顯示的 6 碼）</span>
+          <input type="text" name="code" required maxlength="12" autocomplete="off" autocapitalize="characters"
+                 style="font-family:ui-monospace,monospace;letter-spacing:.15em;text-transform:uppercase">
+        </label>
+        <div id="cancelErr" class="hidden"></div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="btn secondary" data-close>返回</button>
+        <button type="submit" class="btn danger" id="cancelBtn">確定取消</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/common.js"></script>
+  <script src="/my.js"></script>
+</body>
+</html>

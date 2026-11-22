@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>老師後台</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span><span data-school>約課系統</span>・老師後台</span></div>
+      <nav class="nav">
+        <a href="/" target="_blank">學生頁面 ↗</a>
+        <a href="#" id="logout" class="hidden">登出</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- 登入 -->
+    <section id="loginView" class="hidden">
+      <form id="loginForm" class="card stack" style="max-width:380px;margin:40px auto">
+        <h1>老師登入</h1>
+        <label class="field">後台密碼
+          <input type="password" name="password" required autocomplete="current-password">
+        </label>
+        <div id="loginErr" class="hidden"></div>
+        <button class="btn block" type="submit">登入</button>
+      </form>
+    </section>
+
+    <!-- 後台 -->
+    <section id="appView" class="hidden">
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="schedule">課表與名單</button>
+        <button role="tab" aria-selected="false" data-tab="create">開課</button>
+      </div>
+
+      <div id="tab-schedule">
+        <div class="toolbar">
+          <button class="btn secondary small" id="prev" aria-label="上一週">‹ 上週</button>
+          <button class="btn secondary small" id="today">本週</button>
+          <button class="btn secondary small" id="next" aria-label="下一週">下週 ›</button>
+          <span class="range" id="range"></span>
+        </div>
+        <div id="schedule" aria-live="polite"></div>
+      </div>
+
+      <div id="tab-create" class="hidden">
+        <div class="tabs" role="tablist" style="border:none;margin-bottom:10px">
+          <button type="button" role="tab" aria-selected="true" data-mode="batch">每週固定時段</button>
+          <button type="button" role="tab" aria-selected="false" data-mode="single">單堂課</button>
+        </div>
+        <form id="createForm" class="card stack">
+          <label class="field">課程名稱
+            <input type="text" name="title" maxlength="60" required placeholder="例如：兒童班、成人班、一對一">
+          </label>
+
+          <div data-for="single" class="hidden">
+            <label class="field">日期 <input type="date" name="date"></label>
+          </div>
+          <div data-for="batch" class="stack">
+            <div class="row">
+              <label class="field">從 <input type="date" name="startDate"></label>
+              <label class="field">到 <input type="date" name="endDate"></label>
+            </div>
+            <div>
+              <span class="field" style="font-weight:600;font-size:.9rem">每週哪幾天</span>
+              <div class="weekdays" id="weekdays"></div>
+            </div>
+          </div>
+
+          <div class="row">
+            <label class="field">開始時間 <span class="hint" data-for="batch">（多個時段用逗號分隔）</span>
+              <input type="text" name="time" required placeholder="19:00" inputmode="numeric">
+            </label>
+            <label class="field">課程長度（分鐘）
+              <input type="number" name="duration" min="5" max="600" value="60" required>
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">名額
+              <input type="number" name="capacity" min="1" max="500" value="10" required>
+            </label>
+            <div></div>
+          </div>
+          <label class="field">課程說明 <span class="hint">（選填，學生看得到）</span>
+            <textarea name="note" maxlength="300" placeholder="例如：適合 6–12 歲、請穿道服"></textarea>
+          </label>
+          <div id="createMsg" class="hidden"></div>
+          <button class="btn block" type="submit" id="createBtn">建立課程</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <!-- 編輯課程 -->
+  <dialog id="editDlg">
+    <form id="editForm" method="dialog">
+      <div class="dlg-head"><h3>編輯課程</h3></div>
+      <div class="dlg-body stack">
+        <label class="field">課程名稱 <input type="text" name="title" maxlength="60" required></label>
+        <div class="row">
+          <label class="field">日期 <input type="date" name="date" required></label>
+          <label class="field">開始時間 <input type="time" name="time" required></label>
+        </div>
+        <div class="row">
+          <label class="field">長度（分鐘）<input type="number" name="duration" min="5" max="600" required></label>
+          <label class="field">名額 <input type="number" name="capacity" min="1" max="500" required></label>
+        </div>
+        <label class="field">課程說明 <textarea name="note" maxlength="300"></textarea></label>
+        <div id="editErr" class="hidden"></div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="btn secondary" data-close>取消</button>
+        <button type="submit" class="btn">儲存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 代學生預約 -->
+  <dialog id="addDlg">
+    <form id="addForm" method="dialog">
+      <div class="dlg-head"><h3>幫學生預約</h3></div>
+      <div class="dlg-body stack">
+        <div class="summary" id="addSummary"></div>
+        <label class="field">學生姓名 <input type="text" name="name" maxlength="40" required></label>
+        <label class="field">聯絡電話 <input type="tel" name="phone" required inputmode="tel"></label>
+        <label class="field">備註 <span class="hint">（選填）</span><input type="text" name="note" maxlength="200"></label>
+        <div id="addErr" class="hidden"></div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="btn secondary" data-close>取消</button>
+        <button type="submit" class="btn">加入</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/common.js"></script>
+  <script src="/admin.js"></script>
+</body>
+</html>
