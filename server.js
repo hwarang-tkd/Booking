@@ -4,9 +4,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { openDb, createStore } = require('./lib/db');
+const { CATEGORIES, CATEGORY_IDS, DEFAULT_TEMPLATES } = require('./lib/schedule');
 const T = require('./lib/time');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const PAGES = { '/': '/index.html', '/my': '/my.html', '/info': '/info.html', '/admin': '/admin.html' };
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -14,15 +16,20 @@ const MIME = {
 };
 
 function loadConfig(env = process.env) {
+  const num = (v, d) => (v !== undefined && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : d);
   return {
-    port: Number(env.PORT) || 3000,
+    port: num(env.PORT, 3000),
     dbPath: env.DB_PATH || path.join(__dirname, 'data', 'booking.db'),
     adminPassword: env.ADMIN_PASSWORD || 'admin1234',
     timeZone: env.TIMEZONE || 'Asia/Taipei',
-    schoolName: env.SCHOOL_NAME || '我的教室',
-    cancelHours: env.CANCEL_HOURS !== undefined ? Number(env.CANCEL_HOURS) : 2,
-    bookCutoffMinutes: env.BOOK_CUTOFF_MINUTES !== undefined ? Number(env.BOOK_CUTOFF_MINUTES) : 0,
-    bookAheadDays: Number(env.BOOK_AHEAD_DAYS) || 28,
+    schoolName: env.SCHOOL_NAME || '花郎武道館',
+    address: env.SCHOOL_ADDRESS ?? '台北市忠孝東路一段176號2樓之1',
+    addressNote: env.SCHOOL_ADDRESS_NOTE ?? '近善導寺捷運站 5 號出口',
+    facebookUrl: env.FACEBOOK_URL || '',
+    cancelHours: num(env.CANCEL_HOURS, 2),
+    bookCutoffMinutes: num(env.BOOK_CUTOFF_MINUTES, 0),
+    bookAheadDays: num(env.BOOK_AHEAD_DAYS, 28) || 28,
+    seedSchedule: env.SEED_SCHEDULE !== '0',
   };
 }
 
@@ -46,35 +53,61 @@ const normPhone = (v) => {
   if (!/^\+?\d{8,15}$/.test(p)) throw new HttpError(400, '請輸入正確的電話號碼');
   return p;
 };
+const category = (v) => (CATEGORY_IDS.includes(v) ? v : 'other');
 
 function createApp(cfg) {
   const db = openDb(cfg.dbPath);
   const store = createStore(db);
+  if (cfg.seedSchedule && store.isEmpty()) store.createTemplates(DEFAULT_TEMPLATES);
+
   const sessions = new Map(); // token -> expiresAt
   const SESSION_MS = 12 * 3600 * 1000;
   const loginFails = new Map(); // ip -> {count, until}
 
   const now = () => T.nowLocal(cfg.timeZone);
-  const isOpen = (slot) => T.minutesBetween(now(), slot.start_at) > cfg.bookCutoffMinutes;
+  const today = () => now().slice(0, 10);
+  const isOpen = (slot) => !slot.cancelled && T.minutesBetween(now(), slot.start_at) > cfg.bookCutoffMinutes;
   const canCancel = (slot) => T.minutesBetween(now(), slot.start_at) >= cfg.cancelHours * 60;
 
+  // 依固定課表自動補齊課程（同一天內只對新範圍做一次）
+  let generated = { day: '', until: '' };
+  function ensureGenerated(untilDate) {
+    const d = today();
+    const max = T.addDays(d, 120);
+    if (untilDate > max) untilDate = max;
+    if (generated.day === d && generated.until >= untilDate) return;
+    const from = generated.day === d ? generated.until : d;
+    const dates = [];
+    for (let x = from; x < untilDate; x = T.addDays(x, 1)) dates.push({ date: x, weekday: T.weekday(x) });
+    if (dates.length) store.generate(dates);
+    generated = { day: d, until: untilDate };
+  }
+  const resetGenerated = () => { generated = { day: '', until: '' }; };
+
   const publicSlot = (s) => ({
-    id: s.id, title: s.title, startAt: s.start_at, durationMin: s.duration_min,
-    capacity: s.capacity, booked: s.booked, remaining: Math.max(0, s.capacity - s.booked),
-    note: s.note, open: isOpen(s),
+    id: s.id, title: s.title, subtitle: s.subtitle, category: s.category, startAt: s.start_at,
+    durationMin: s.duration_min, capacity: s.capacity, booked: s.booked,
+    remaining: Math.max(0, s.capacity - s.booked), note: s.note, open: isOpen(s),
+  });
+  const publicTemplate = (t) => ({
+    id: t.id, title: t.title, subtitle: t.subtitle, category: t.category, weekday: t.weekday, time: t.time,
+    durationMin: t.duration_min, capacity: t.capacity, note: t.note,
   });
 
-  function parseSlotInput(b) {
-    const date = b.date, time = b.time;
-    if (!T.isValidDate(date)) throw new HttpError(400, '日期格式錯誤');
-    if (!T.isValidTime(time)) throw new HttpError(400, '時間格式錯誤');
+  function parseClassFields(b) {
     return {
       title: str(b.title, 60, '課程名稱'),
-      startAt: `${date}T${time}`,
+      subtitle: str(b.subtitle, 80, '副標題', { required: false }),
+      category: category(b.category),
       duration: int(b.duration, 5, 600, '課程長度（分鐘）'),
       capacity: int(b.capacity, 1, 500, '名額'),
       note: str(b.note, 300, '備註', { required: false }),
     };
+  }
+  function parseSlotInput(b) {
+    if (!T.isValidDate(b.date)) throw new HttpError(400, '日期格式錯誤');
+    if (!T.isValidTime(b.time)) throw new HttpError(400, '時間格式錯誤');
+    return { ...parseClassFields(b), startAt: `${b.date}T${b.time}` };
   }
 
   function requireAdmin(req) {
@@ -91,20 +124,24 @@ function createApp(cfg) {
 
   // ---------- 公開 API ----------
   route('GET', /^\/api\/config$/, () => ({
-    schoolName: cfg.schoolName, cancelHours: cfg.cancelHours, bookAheadDays: cfg.bookAheadDays,
-    timeZone: cfg.timeZone, now: now(),
+    schoolName: cfg.schoolName, address: cfg.address, addressNote: cfg.addressNote, facebookUrl: cfg.facebookUrl,
+    cancelHours: cfg.cancelHours, bookAheadDays: cfg.bookAheadDays, timeZone: cfg.timeZone, now: now(),
+    categories: CATEGORIES,
   }));
 
+  route('GET', /^\/api\/templates$/, () => ({ templates: store.listTemplates().map(publicTemplate) }));
+
   route('GET', /^\/api\/slots$/, (req, url) => {
-    const today = now().slice(0, 10);
-    let from = url.searchParams.get('from') || today;
+    const d = today();
+    let from = url.searchParams.get('from') || d;
     if (!T.isValidDate(from)) throw new HttpError(400, '日期格式錯誤');
-    if (from < today) from = today;
+    if (from < d) from = d;
     const days = Math.min(Number(url.searchParams.get('days')) || 7, 62);
-    const lastDay = T.addDays(today, cfg.bookAheadDays);
+    const lastDay = T.addDays(d, cfg.bookAheadDays + 1);
     let to = T.addDays(from, days);
     if (to > lastDay) to = lastDay;
     if (from >= to) return { slots: [] };
+    ensureGenerated(lastDay);
     return { slots: store.listSlots(from + 'T00:00', to + 'T00:00').filter(isOpen).map(publicSlot) };
   });
 
@@ -114,22 +151,22 @@ function createApp(cfg) {
     const phone = normPhone(body.phone);
     const note = str(body.note, 200, '備註', { required: false });
     const slot = store.getSlot(slotId);
-    if (slot && slot.start_at.slice(0, 10) > T.addDays(now().slice(0, 10), cfg.bookAheadDays)) {
+    if (slot && slot.start_at.slice(0, 10) > T.addDays(today(), cfg.bookAheadDays)) {
       throw new HttpError(409, '這堂課尚未開放預約');
     }
-    const r = store.book({ slotId, name, phone, note, isOpen });
+    const r = store.book({ slotId, name, phone, note, trial: body.trial === true, isOpen });
     if (r.error) throw new HttpError(r.status, r.error);
-    return { status: 201, body: { code: r.booking.code, name: r.booking.name, slot: publicSlot(r.slot) } };
+    return { status: 201, body: { code: r.booking.code, name: r.booking.name, trial: !!r.booking.trial, slot: publicSlot(r.slot) } };
   });
 
   route('GET', /^\/api\/bookings$/, (req, url) => {
     const phone = normPhone(url.searchParams.get('phone'));
-    const since = T.addDays(now().slice(0, 10), -1) + 'T00:00';
+    const since = T.addDays(today(), -1) + 'T00:00';
     return {
       bookings: store.bookingsByPhone(phone, since).map((b) => ({
-        name: b.name, status: b.status, title: b.title, startAt: b.start_at, durationMin: b.duration_min,
-        note: b.slot_note, past: b.start_at <= now(),
-        cancellable: b.status === 'active' && canCancel(b),
+        name: b.name, status: b.status, trial: !!b.trial, title: b.title, subtitle: b.subtitle, category: b.category,
+        startAt: b.start_at, durationMin: b.duration_min, past: b.start_at <= now(), slotCancelled: !!b.slot_cancelled,
+        cancellable: b.status === 'active' && !b.slot_cancelled && canCancel(b),
         codeHint: b.code.slice(0, 2) + '••••',
       })),
     };
@@ -173,48 +210,26 @@ function createApp(cfg) {
 
   route('GET', /^\/api\/admin\/slots$/, (req, url) => {
     requireAdmin(req);
-    const from = url.searchParams.get('from') || now().slice(0, 10);
-    const to = url.searchParams.get('to') || T.addDays(from, 14);
+    const from = url.searchParams.get('from') || today();
+    const to = url.searchParams.get('to') || T.addDays(from, 7);
     if (!T.isValidDate(from) || !T.isValidDate(to)) throw new HttpError(400, '日期格式錯誤');
-    const slots = store.listSlots(from + 'T00:00', to + 'T00:00');
+    ensureGenerated(to > T.addDays(today(), cfg.bookAheadDays + 1) ? to : T.addDays(today(), cfg.bookAheadDays + 1));
     return {
       now: now(),
-      slots: slots.map((s) => ({
-        ...publicSlot(s),
+      slots: store.listSlots(from + 'T00:00', to + 'T00:00').map((s) => ({
+        ...publicSlot(s), cancelled: !!s.cancelled, fromTemplate: s.template_id != null,
         bookings: store.slotBookings(s.id).map((b) => ({
-          id: b.id, name: b.name, phone: b.phone, note: b.note, code: b.code,
+          id: b.id, name: b.name, phone: b.phone, note: b.note, code: b.code, trial: !!b.trial,
           status: b.status, createdAt: b.created_at,
         })),
       })),
     };
   });
 
+  // 臨時加開的單堂課
   route('POST', /^\/api\/admin\/slots$/, (req, url, body) => {
     requireAdmin(req);
-    const id = store.createSlot(parseSlotInput(body));
-    return { status: 201, body: { id } };
-  });
-
-  route('POST', /^\/api\/admin\/slots\/batch$/, (req, url, body) => {
-    requireAdmin(req);
-    const { startDate, endDate } = body;
-    if (!T.isValidDate(startDate) || !T.isValidDate(endDate)) throw new HttpError(400, '日期格式錯誤');
-    if (endDate < startDate) throw new HttpError(400, '結束日期不能早於開始日期');
-    if (T.minutesBetween(startDate + 'T00:00', endDate + 'T00:00') > 366 * 1440) throw new HttpError(400, '一次最多建立一年內的課程');
-    const weekdays = Array.isArray(body.weekdays) ? body.weekdays.map(Number).filter((d) => d >= 0 && d <= 6) : [];
-    if (!weekdays.length) throw new HttpError(400, '請至少選擇一個星期');
-    const times = Array.isArray(body.times) ? body.times : [body.time];
-    if (!times.length || !times.every(T.isValidTime)) throw new HttpError(400, '時間格式錯誤');
-    const base = parseSlotInput({ ...body, date: startDate, time: times[0] });
-    const items = [];
-    for (let d = startDate; d <= endDate; d = T.addDays(d, 1)) {
-      if (!weekdays.includes(T.weekday(d))) continue;
-      for (const t of times) items.push({ ...base, startAt: `${d}T${t}` });
-    }
-    if (!items.length) throw new HttpError(400, '這段期間沒有符合的日期');
-    if (items.length > 500) throw new HttpError(400, '一次最多建立 500 堂課');
-    const ids = store.createSlots(items);
-    return { status: 201, body: { created: ids.length } };
+    return { status: 201, body: { id: store.createSlot(parseSlotInput(body)) } };
   });
 
   route('PUT', /^\/api\/admin\/slots\/(\d+)$/, (req, url, body, [, id]) => {
@@ -227,9 +242,19 @@ function createApp(cfg) {
     return { ok: true };
   });
 
+  // 停課 / 恢復上課
+  route('POST', /^\/api\/admin\/slots\/(\d+)\/(cancel|restore)$/, (req, url, body, [, id, act]) => {
+    requireAdmin(req);
+    if (!store.setCancelled(Number(id), act === 'cancel')) throw new HttpError(404, '找不到這堂課');
+    return { ok: true };
+  });
+
   route('DELETE', /^\/api\/admin\/slots\/(\d+)$/, (req, url, body, [, id]) => {
     requireAdmin(req);
-    if (!store.deleteSlot(Number(id))) throw new HttpError(404, '找不到這堂課');
+    const slot = store.getSlot(Number(id));
+    if (!slot) throw new HttpError(404, '找不到這堂課');
+    if (slot.template_id != null) throw new HttpError(409, '固定課表的課程請改用「停課」');
+    store.deleteSlot(slot.id);
     return { ok: true };
   });
 
@@ -246,10 +271,39 @@ function createApp(cfg) {
     requireAdmin(req);
     const r = store.book({
       slotId: Number(id), name: str(body.name, 40, '姓名'), phone: normPhone(body.phone),
-      note: str(body.note, 200, '備註', { required: false }), isOpen: () => true,
+      note: str(body.note, 200, '備註', { required: false }), trial: body.trial === true,
+      isOpen: (s) => !s.cancelled,
     });
     if (r.error) throw new HttpError(r.status, r.error);
     return { status: 201, body: { code: r.booking.code } };
+  });
+
+  // 固定課表
+  route('GET', /^\/api\/admin\/templates$/, (req) => {
+    requireAdmin(req);
+    return { templates: store.listTemplates().map(publicTemplate) };
+  });
+
+  route('POST', /^\/api\/admin\/templates$/, (req, url, body) => {
+    requireAdmin(req);
+    if (!T.isValidTime(body.time)) throw new HttpError(400, '時間格式錯誤');
+    const id = store.createTemplate({ ...parseClassFields(body), weekday: int(body.weekday, 0, 6, '星期'), time: body.time });
+    resetGenerated();
+    return { status: 201, body: { id } };
+  });
+
+  route('PUT', /^\/api\/admin\/templates\/(\d+)$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    if (!store.updateTemplate(Number(id), parseClassFields(body), now())) throw new HttpError(404, '找不到這個時段');
+    return { ok: true };
+  });
+
+  route('DELETE', /^\/api\/admin\/templates\/(\d+)$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const kept = store.deleteTemplate(Number(id), now());
+    if (kept === null) throw new HttpError(404, '找不到這個時段');
+    resetGenerated();
+    return { ok: true, kept };
   });
 
   // ---------- HTTP 處理 ----------
@@ -271,15 +325,15 @@ function createApp(cfg) {
   }
 
   function send(res, status, data) {
-    const body = JSON.stringify(data);
     res.writeHead(status, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
-    res.end(body);
+    res.end(JSON.stringify(data));
   }
 
   function serveStatic(req, res, pathname) {
-    if (pathname === '/') pathname = '/index.html';
-    else if (pathname === '/admin' || pathname === '/my') pathname += '.html';
-    const file = path.normalize(path.join(PUBLIC_DIR, decodeURIComponent(pathname)));
+    pathname = PAGES[pathname] || pathname;
+    let file;
+    try { file = path.normalize(path.join(PUBLIC_DIR, decodeURIComponent(pathname))); }
+    catch { res.writeHead(400); return res.end(); }
     if (!file.startsWith(PUBLIC_DIR + path.sep)) { res.writeHead(403); return res.end(); }
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('找不到頁面'); }
@@ -329,7 +383,7 @@ if (require.main === module) {
     console.warn('⚠️  尚未設定 ADMIN_PASSWORD，目前後台密碼為預設值 admin1234，正式使用前請務必修改！');
   }
   createApp(cfg).listen(cfg.port, () => {
-    console.log(`✅ 約課系統已啟動：http://localhost:${cfg.port}`);
+    console.log(`✅ ${cfg.schoolName} 約課系統已啟動：http://localhost:${cfg.port}`);
     console.log(`   老師後台：http://localhost:${cfg.port}/admin`);
   });
 }

@@ -1,6 +1,6 @@
 (async () => {
   const $ = (id) => document.getElementById(id);
-  let cfg, slots = [], selected = null, booking = null;
+  let cfg, all = [], slots = [], selected = null, booking = null, filter = 'all';
 
   document.querySelectorAll('dialog [data-close]').forEach((b) =>
     b.addEventListener('click', () => b.closest('dialog').close()));
@@ -17,13 +17,35 @@
   async function load() {
     try {
       const r = await api(`/api/slots?days=${cfg.bookAheadDays + 1}`);
-      slots = r.slots;
+      all = r.slots;
+      applyFilter();
     } catch (e) {
       $('list').innerHTML = `<div class="alert error">${esc(e.message)}</div>`;
       return;
     }
+    renderFilters();
     renderDates();
     renderList();
+  }
+
+  function applyFilter() {
+    slots = filter === 'all' ? all : all.filter((s) => s.category === filter);
+  }
+
+  function renderFilters() {
+    const used = new Set(all.map((s) => s.category));
+    const el = $('filters');
+    el.innerHTML = '';
+    const opts = [{ id: 'all', name: '全部課程' }, ...cfg.categories.filter((c) => used.has(c.id))];
+    if (opts.length <= 2) { el.classList.add('hidden'); return; }
+    for (const c of opts) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(filter === c.id));
+      b.innerHTML = (c.id === 'all' ? '' : `<i style="${catStyle(c.id)}"></i>`) + esc(c.name);
+      b.onclick = () => { filter = c.id; applyFilter(); selected = null; renderFilters(); renderDates(); renderList(); };
+      el.appendChild(b);
+    }
   }
 
   function renderDates() {
@@ -55,7 +77,7 @@
     const day = slots.filter((s) => s.startAt.startsWith(selected));
     if (!day.length) {
       const next = slots.find((s) => s.startAt.slice(0, 10) > selected);
-      list.innerHTML = `<div class="card empty">${fmtDate(selected)} 沒有開放預約的課程` +
+      list.innerHTML = `<div class="card empty">${fmtDate(selected)} 沒有${filter === 'all' ? '' : '「' + esc(catName(filter)) + '」'}開放預約的課程` +
         (next ? `<br><button class="btn ghost" id="jump">看下一個有課的日子：${fmtDate(next.startAt.slice(0, 10))} →</button>` : '') +
         `</div>`;
       if (next) $('jump').onclick = () => { selected = next.startAt.slice(0, 10); renderDates(); renderList(); };
@@ -66,11 +88,13 @@
       const full = s.remaining <= 0;
       const pct = Math.min(100, Math.round((s.booked / s.capacity) * 100));
       const card = document.createElement('div');
-      card.className = 'card slot';
+      card.className = 'card slot cat';
+      card.style.cssText = catStyle(s.category);
       card.innerHTML = `
         <div class="time"><b>${s.startAt.slice(11)}</b><small>至 ${endTime(s.startAt, s.durationMin)}</small></div>
         <div class="info">
           <div class="title">${esc(s.title)}</div>
+          ${s.subtitle ? `<div class="subtitle">${esc(s.subtitle)}</div>` : ''}
           ${s.note ? `<div class="note">${esc(s.note)}</div>` : ''}
           <div class="meta">
             ${full ? '<span class="badge danger">已額滿</span>'
@@ -93,8 +117,9 @@
     f.name.value = saved.name || '';
     f.phone.value = saved.phone || '';
     f.note.value = '';
+    f.trial.checked = false;
     $('bookErr').classList.add('hidden');
-    $('bookSummary').innerHTML = `<b>${esc(s.title)}</b><br>${fmtSlot(s)}`;
+    $('bookSummary').innerHTML = `<b>${esc(s.title)}</b>${s.subtitle ? `　<span class="muted">${esc(s.subtitle)}</span>` : ''}<br>${fmtSlot(s)}`;
     $('bookDlg').showModal();
     (f.name.value ? f.note : f.name).focus();
   }
@@ -104,14 +129,14 @@
     const f = ev.target, btn = $('bookBtn');
     btn.disabled = true; btn.textContent = '送出中…';
     try {
-      const body = { slotId: booking.id, name: f.name.value, phone: f.phone.value, note: f.note.value };
+      const body = { slotId: booking.id, name: f.name.value, phone: f.phone.value, note: f.note.value, trial: f.trial.checked };
       const r = await api('/api/bookings', { method: 'POST', body });
       store('student', { name: body.name.trim(), phone: body.phone.trim() });
       const mine = store('myCodes') || [];
       mine.push({ code: r.code, startAt: r.slot.startAt, title: r.slot.title });
       store('myCodes', mine.slice(-50));
       $('bookDlg').close();
-      $('doneSummary').innerHTML = `<b>${esc(r.name)}</b>　${esc(r.slot.title)}<br>${fmtSlot(r.slot)}`;
+      $('doneSummary').innerHTML = `<b>${esc(r.name)}</b>　${esc(r.slot.title)}${r.trial ? '（體驗課）' : ''}<br>${fmtSlot(r.slot)}`;
       $('doneCode').textContent = r.code;
       $('doneHint').textContent = cfg.cancelHours > 0
         ? `如需取消，請於上課前 ${cfg.cancelHours} 小時到「我的預約」辦理。` : '如需取消，請到「我的預約」辦理。';

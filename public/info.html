@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>課表與收費</title>
+  <link rel="icon" href="/logo.png" type="image/png">
+  <meta name="theme-color" content="#d4959a">
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    main.wide { max-width: 1040px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/"><img src="/logo.png" alt=""><span data-school>花郎武道館</span></a>
+      <nav class="nav">
+        <a href="/">預約課程</a>
+        <a href="/my">我的預約</a>
+        <a href="/info" aria-current="page">課表與收費</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wide">
+    <h1>每週課表</h1>
+    <p class="sub">親愛的會員們，來上課前記得先<a href="/">線上報名</a>喔！</p>
+    <div id="week" class="week" aria-live="polite"><div class="empty">載入中…</div></div>
+
+    <h1 id="rates" style="margin-top:40px">收費 Rate</h1>
+    <p class="callout">親愛的會員，請務必於您該期課程的第一堂課前完成款項支付。</p>
+
+    <h2>兒童與成人團體班 Group Classes</h2>
+    <div class="card" style="overflow-x:auto">
+      <table class="price">
+        <thead><tr><th>體驗課</th><th>一個月內 4 堂</th><th>一個月內 8 堂</th><th>一個月內 12 堂</th><th>單堂</th></tr></thead>
+        <tbody><tr><td><b>200</b> 元</td><td><b>2,000</b> 元</td><td><b>2,600</b> 元</td><td><b>3,200</b> 元</td><td><b>600</b> 元</td></tr></tbody>
+      </table>
+    </div>
+
+    <h2>幼兒班／跆拳道期班</h2>
+    <div class="card">平均單堂 <b>400 元</b>，每月總堂數規定有所不同，請私訊 <span id="fb">FB 粉絲專頁</span>。</div>
+
+    <h2>私人課 Private Session</h2>
+    <div class="card" style="overflow-x:auto">
+      <table class="price">
+        <thead><tr><th>1 小時</th><th>5 小時</th></tr></thead>
+        <tbody><tr><td><b>1,200</b> 元</td><td><b>5,000</b> 元</td></tr></tbody>
+      </table>
+    </div>
+
+    <h2>場地租借 Venue Rental</h2>
+    <div class="card" style="overflow-x:auto">
+      <table class="price">
+        <thead><tr><th>團體課程</th><th>一對一<br><small class="muted">（同一時段最多三組）</small></th><th>自主訓練</th></tr></thead>
+        <tbody><tr>
+          <td><b>600</b> 元／小時<br><b>5,000</b> 元／10 小時</td>
+          <td><b>200</b> 元／小時</td>
+          <td><b>100</b> 元／小時</td>
+        </tr></tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:.9rem">課表中空白的時段皆可供出租，歡迎洽詢。</p>
+
+    <h2>地址</h2>
+    <div class="card" id="addr"></div>
+  </main>
+
+  <footer class="site"></footer>
+
+  <script src="/common.js"></script>
+  <script>
+    (async () => {
+      const box = document.getElementById('week');
+      try {
+        const cfg = await applyConfig();
+        const { templates } = await api('/api/templates');
+        box.innerHTML = '';
+        for (const d of [1, 2, 3, 4, 5, 6, 0]) {
+          const col = document.createElement('div');
+          col.className = 'col';
+          const items = templates.filter((t) => t.weekday === d);
+          col.innerHTML = `<h3>禮拜${DOW[d]}</h3>` + (items.length ? items.map((t) => `
+            <div class="cls" style="${catStyle(t.category)}">
+              <div><b>${esc(t.title)}</b>${t.subtitle ? `<span class="st">${t.subtitle.split('・').map(esc).join('<i>・</i><br>')}</span>` : ''}</div>
+              <div class="t">${t.time}–${endTime('2000-01-01T' + t.time, t.durationMin)}</div>
+            </div>`).join('') : '<div class="none">可供出租</div>');
+          box.appendChild(col);
+        }
+        const q = encodeURIComponent(cfg.address);
+        document.getElementById('addr').innerHTML = cfg.address
+          ? `<b>${esc(cfg.schoolName)}</b><br>${esc(cfg.address)}<br>${esc(cfg.addressNote)}<br>
+             <a class="btn secondary small" style="margin-top:10px" target="_blank" rel="noopener"
+                href="https://www.google.com/maps/search/?api=1&query=${q}">在 Google 地圖開啟</a>` : '';
+        if (cfg.facebookUrl) {
+          document.getElementById('fb').innerHTML = `<a href="${esc(cfg.facebookUrl)}" target="_blank" rel="noopener">FB 粉絲專頁</a>`;
+        }
+      } catch (e) {
+        box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`;
+      }
+    })();
+  </script>
+</body>
+</html>

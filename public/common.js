@@ -57,9 +57,21 @@ function showError(el, msg) {
   el.textContent = msg; el.className = 'alert error'; el.classList.remove('hidden');
 }
 
+// 課程分類顏色
+let CATS = {};
+const catColor = (id) => (CATS[id] || CATS.other || {}).color || '#ddd';
+const catName = (id) => (CATS[id] || {}).name || '';
+const catStyle = (id) => `--cat:${catColor(id)}`;
+
 async function applyConfig() {
   const cfg = await api('/api/config');
+  CATS = Object.fromEntries(cfg.categories.map((c) => [c.id, c]));
   document.querySelectorAll('[data-school]').forEach((el) => { el.textContent = cfg.schoolName; });
+  const foot = document.querySelector('footer.site');
+  if (foot && cfg.address) {
+    foot.innerHTML = `${esc(cfg.schoolName)}・${esc(cfg.address)}${cfg.addressNote ? `<br>${esc(cfg.addressNote)}` : ''}` +
+      (cfg.facebookUrl ? `<br><a href="${esc(cfg.facebookUrl)}" target="_blank" rel="noopener">Facebook 粉絲專頁</a>` : '');
+  }
   document.title = `${document.title}｜${cfg.schoolName}`;
   return cfg;
 }

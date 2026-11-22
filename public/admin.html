@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
   <title>老師後台</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/logo.png" type="image/png">
+  <meta name="theme-color" content="#d4959a">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="brand"><span><span data-school>約課系統</span>・老師後台</span></div>
+      <a class="brand" href="/admin"><img src="/logo.png" alt=""><span><span data-school>花郎武道館</span>・後台</span></a>
       <nav class="nav">
         <a href="/" target="_blank">學生頁面 ↗</a>
         <a href="#" id="logout" class="hidden">登出</a>
@@ -36,9 +37,11 @@
     <section id="appView" class="hidden">
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected="true" data-tab="schedule">課表與名單</button>
-        <button role="tab" aria-selected="false" data-tab="create">開課</button>
+        <button role="tab" aria-selected="false" data-tab="templates">固定課表</button>
+        <button role="tab" aria-selected="false" data-tab="extra">加開課程</button>
       </div>
 
+      <!-- 課表與名單 -->
       <div id="tab-schedule">
         <div class="toolbar">
           <button class="btn secondary small" id="prev" aria-label="上一週">‹ 上週</button>
@@ -49,70 +52,74 @@
         <div id="schedule" aria-live="polite"></div>
       </div>
 
-      <div id="tab-create" class="hidden">
-        <div class="tabs" role="tablist" style="border:none;margin-bottom:10px">
-          <button type="button" role="tab" aria-selected="true" data-mode="batch">每週固定時段</button>
-          <button type="button" role="tab" aria-selected="false" data-mode="single">單堂課</button>
-        </div>
-        <form id="createForm" class="card stack">
-          <label class="field">課程名稱
-            <input type="text" name="title" maxlength="60" required placeholder="例如：兒童班、成人班、一對一">
-          </label>
-
-          <div data-for="single" class="hidden">
-            <label class="field">日期 <input type="date" name="date"></label>
-          </div>
-          <div data-for="batch" class="stack">
-            <div class="row">
-              <label class="field">從 <input type="date" name="startDate"></label>
-              <label class="field">到 <input type="date" name="endDate"></label>
-            </div>
-            <div>
-              <span class="field" style="font-weight:600;font-size:.9rem">每週哪幾天</span>
-              <div class="weekdays" id="weekdays"></div>
-            </div>
-          </div>
-
+      <!-- 固定課表 -->
+      <div id="tab-templates" class="hidden">
+        <p class="sub">每週固定的課。系統會自動開放未來幾週的預約，不用每週手動開課。
+          遇到國定假日或臨時休館，到「課表與名單」把那一堂設為<b>停課</b>就好。</p>
+        <div id="templates"></div>
+        <h2>新增固定時段</h2>
+        <form id="tplForm" class="card stack">
           <div class="row">
-            <label class="field">開始時間 <span class="hint" data-for="batch">（多個時段用逗號分隔）</span>
-              <input type="text" name="time" required placeholder="19:00" inputmode="numeric">
+            <label class="field">星期
+              <select name="weekday" required>
+                <option value="1">禮拜一</option><option value="2">禮拜二</option><option value="3">禮拜三</option>
+                <option value="4">禮拜四</option><option value="5">禮拜五</option><option value="6">禮拜六</option>
+                <option value="0">禮拜日</option>
+              </select>
             </label>
-            <label class="field">課程長度（分鐘）
-              <input type="number" name="duration" min="5" max="600" value="60" required>
-            </label>
+            <label class="field">開始時間 <input type="time" name="time" required value="19:30"></label>
           </div>
+          <div data-fields></div>
+          <div id="tplMsg" class="hidden"></div>
+          <button class="btn block" type="submit">新增到固定課表</button>
+        </form>
+      </div>
+
+      <!-- 加開課程 -->
+      <div id="tab-extra" class="hidden">
+        <p class="sub">只上一次的課，例如特別班、檢定、營隊或補課。</p>
+        <form id="extraForm" class="card stack">
           <div class="row">
-            <label class="field">名額
-              <input type="number" name="capacity" min="1" max="500" value="10" required>
-            </label>
-            <div></div>
+            <label class="field">日期 <input type="date" name="date" required></label>
+            <label class="field">開始時間 <input type="time" name="time" required value="19:30"></label>
           </div>
-          <label class="field">課程說明 <span class="hint">（選填，學生看得到）</span>
-            <textarea name="note" maxlength="300" placeholder="例如：適合 6–12 歲、請穿道服"></textarea>
-          </label>
-          <div id="createMsg" class="hidden"></div>
-          <button class="btn block" type="submit" id="createBtn">建立課程</button>
+          <div data-fields></div>
+          <div id="extraMsg" class="hidden"></div>
+          <button class="btn block" type="submit">建立課程</button>
         </form>
       </div>
     </section>
   </main>
 
-  <!-- 編輯課程 -->
+  <!-- 編輯單堂課程 -->
   <dialog id="editDlg">
     <form id="editForm" method="dialog">
-      <div class="dlg-head"><h3>編輯課程</h3></div>
+      <div class="dlg-head"><h3>編輯這一堂課</h3></div>
       <div class="dlg-body stack">
-        <label class="field">課程名稱 <input type="text" name="title" maxlength="60" required></label>
         <div class="row">
           <label class="field">日期 <input type="date" name="date" required></label>
           <label class="field">開始時間 <input type="time" name="time" required></label>
         </div>
-        <div class="row">
-          <label class="field">長度（分鐘）<input type="number" name="duration" min="5" max="600" required></label>
-          <label class="field">名額 <input type="number" name="capacity" min="1" max="500" required></label>
-        </div>
-        <label class="field">課程說明 <textarea name="note" maxlength="300"></textarea></label>
+        <div data-fields></div>
+        <p class="muted hidden" id="editTplHint" style="font-size:.85rem;margin:0">只會改這一堂。要改每週的課，請到「固定課表」。</p>
         <div id="editErr" class="hidden"></div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="btn secondary" data-close>取消</button>
+        <button type="submit" class="btn">儲存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 編輯固定時段 -->
+  <dialog id="tplDlg">
+    <form id="tplEditForm" method="dialog">
+      <div class="dlg-head"><h3>編輯固定時段</h3></div>
+      <div class="dlg-body stack">
+        <div class="summary" id="tplSummary"></div>
+        <div data-fields></div>
+        <p class="muted" style="font-size:.85rem;margin:0">修改會套用到之後所有已開放的課。要換星期或時間，請刪除後重新新增。</p>
+        <div id="tplErr" class="hidden"></div>
       </div>
       <div class="dlg-foot">
         <button type="button" class="btn secondary" data-close>取消</button>
@@ -129,6 +136,7 @@
         <div class="summary" id="addSummary"></div>
         <label class="field">學生姓名 <input type="text" name="name" maxlength="40" required></label>
         <label class="field">聯絡電話 <input type="tel" name="phone" required inputmode="tel"></label>
+        <label class="check"><input type="checkbox" name="trial"><span>體驗課</span></label>
         <label class="field">備註 <span class="hint">（選填）</span><input type="text" name="note" maxlength="200"></label>
         <div id="addErr" class="hidden"></div>
       </div>

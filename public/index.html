@@ -4,16 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>預約課程</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/logo.png" type="image/png">
+  <meta name="theme-color" content="#d4959a">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="brand" data-school>約課系統</div>
+      <a class="brand" href="/"><img src="/logo.png" alt=""><span data-school>花郎武道館</span></a>
       <nav class="nav">
         <a href="/" aria-current="page">預約課程</a>
         <a href="/my">我的預約</a>
+        <a href="/info">課表與收費</a>
       </nav>
     </div>
   </header>
@@ -22,6 +24,7 @@
     <h1>選擇上課時間</h1>
     <p class="sub" id="intro">點選日期，查看當天可預約的課程。</p>
 
+    <div class="filters" id="filters" role="group" aria-label="篩選課程"></div>
     <div class="datestrip" id="dates" role="group" aria-label="選擇日期"></div>
     <div id="list" class="stack" aria-live="polite"><div class="empty">載入中…</div></div>
   </main>
@@ -38,8 +41,11 @@
         <label class="field">聯絡電話 <span class="hint">（查詢、取消預約時使用）</span>
           <input type="tel" name="phone" required inputmode="tel" autocomplete="tel" placeholder="0912345678">
         </label>
+        <label class="check"><input type="checkbox" name="trial">
+          <span>這是我第一次來，預約<b>體驗課</b>（200 元）</span>
+        </label>
         <label class="field">備註 <span class="hint">（選填）</span>
-          <textarea name="note" maxlength="200" placeholder="例如：第一次上課、需要借道服…"></textarea>
+          <textarea name="note" maxlength="200" placeholder="例如：小朋友年齡、目前帶別、需要借道服…"></textarea>
         </label>
         <div id="bookErr" class="hidden"></div>
       </div>
@@ -58,12 +64,15 @@
       <p style="margin:14px 0 0">你的預約代碼（取消預約時需要，建議截圖保存）：</p>
       <div class="code-box" id="doneCode"></div>
       <p class="muted" style="margin:0;font-size:.9rem" id="doneHint"></p>
+      <p class="callout" style="margin:12px 0 0">請於該期課程的第一堂課前完成繳費，收費方式請見<a href="/info#rates">「課表與收費」</a>。</p>
     </div>
     <div class="dlg-foot">
       <a class="btn secondary" href="/my">查看我的預約</a>
       <button type="button" class="btn" data-close>完成</button>
     </div>
   </dialog>
+
+  <footer class="site"></footer>
 
   <script src="/common.js"></script>
   <script src="/app.js"></script>

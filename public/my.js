@@ -42,17 +42,19 @@
 
   function card(b) {
     const el = document.createElement('div');
-    el.className = 'card slot';
+    el.className = 'card slot cat';
+    el.style.cssText = catStyle(b.category);
     const cancelled = b.status === 'cancelled';
     const badge = cancelled ? '<span class="badge">已取消</span>'
+      : b.slotCancelled ? '<span class="badge danger">本堂停課</span>'
       : b.past ? '<span class="badge">已結束</span>' : '<span class="badge ok">預約成功</span>';
     el.innerHTML = `
       <div class="time"><b>${b.startAt.slice(11)}</b><small>${fmtDate(b.startAt.slice(0, 10))}</small></div>
       <div class="info">
         <div class="title" ${cancelled ? 'style="text-decoration:line-through;opacity:.6"' : ''}>${esc(b.title)}</div>
-        <div class="note">學生：${esc(b.name)}　代碼：${esc(b.codeHint)}</div>
+        <div class="note">學生：${esc(b.name)}${b.trial ? '（體驗課）' : ''}　代碼：${esc(b.codeHint)}</div>
         <div class="meta">${badge}
-          ${!cancelled && !b.past && !b.cancellable
+          ${!cancelled && !b.past && !b.slotCancelled && !b.cancellable
             ? `<span class="muted" style="font-size:.85rem">已超過線上取消期限，請直接聯絡老師</span>` : ''}
         </div>
       </div>
