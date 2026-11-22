@@ -50,8 +50,15 @@ const int = (v, min, max, field) => {
 };
 const normPhone = (v) => {
   const p = String(v ?? '').replace(/[^\d+]/g, '');
+  if (!p) return '';
   if (!/^\+?\d{8,15}$/.test(p)) throw new HttpError(400, '請輸入正確的電話號碼');
   return p;
+};
+const normEmail = (v) => {
+  const e = String(v ?? '').trim().toLowerCase();
+  if (!e) throw new HttpError(400, '請輸入信箱');
+  if (e.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new HttpError(400, `信箱格式不正確：${e}`);
+  return e;
 };
 const category = (v) => (CATEGORY_IDS.includes(v) ? v : 'other');
 
@@ -60,9 +67,19 @@ function createApp(cfg) {
   const store = createStore(db);
   if (cfg.seedSchedule && store.isEmpty()) store.createTemplates(DEFAULT_TEMPLATES);
 
-  const sessions = new Map(); // token -> expiresAt
-  const SESSION_MS = 12 * 3600 * 1000;
+  const ADMIN_SESSION_MS = 12 * 3600 * 1000;
+  const STUDENT_SESSION_MS = 180 * 86400 * 1000; // 學員登入一次可保持半年
   const loginFails = new Map(); // ip -> {count, until}
+
+  function checkThrottle(req) {
+    const f = loginFails.get(req.socket.remoteAddress || '');
+    if (f && f.until > Date.now()) throw new HttpError(429, '嘗試次數過多，請稍後再試');
+  }
+  function recordFail(req, limit) {
+    const ip = req.socket.remoteAddress || '';
+    const count = (loginFails.get(ip)?.count || 0) + 1;
+    loginFails.set(ip, { count, until: count >= limit ? Date.now() + 5 * 60000 : 0 });
+  }
 
   const now = () => T.nowLocal(cfg.timeZone);
   const today = () => now().slice(0, 10);
@@ -110,13 +127,29 @@ function createApp(cfg) {
     return { ...parseClassFields(b), startAt: `${b.date}T${b.time}` };
   }
 
+  const bearer = (req) => (/^Bearer (\S+)$/.exec(req.headers.authorization || '') || [])[1];
   function requireAdmin(req) {
-    const m = /^Bearer (\S+)$/.exec(req.headers.authorization || '');
-    const exp = m && sessions.get(m[1]);
-    if (!exp || exp < Date.now()) {
-      if (m) sessions.delete(m[1]);
-      throw new HttpError(401, '請先登入');
-    }
+    const t = bearer(req);
+    const s = t && store.getSession(t);
+    if (!s || s.role !== 'admin') throw new HttpError(401, '請先登入');
+  }
+  /** 取得登入中的學員；required=false 時未登入回傳 null。 */
+  function currentStudent(req, required = true) {
+    const t = bearer(req);
+    const s = t && store.getSession(t);
+    const st = s && s.role === 'student' && store.getStudent(s.student_id);
+    if (st && st.active) return st;
+    if (required) throw new HttpError(401, '請先用信箱登入');
+    return null;
+  }
+  const publicStudent = (st) => ({ id: st.id, name: st.name, email: st.email, phone: st.phone });
+  function parseStudent(b) {
+    return {
+      name: str(b.name, 40, '姓名'),
+      email: normEmail(b.email),
+      phone: normPhone(b.phone),
+      note: str(b.note, 300, '備註', { required: false }),
+    };
   }
 
   const routes = [];
@@ -142,70 +175,153 @@ function createApp(cfg) {
     if (to > lastDay) to = lastDay;
     if (from >= to) return { slots: [] };
     ensureGenerated(lastDay);
-    return { slots: store.listSlots(from + 'T00:00', to + 'T00:00').filter(isOpen).map(publicSlot) };
+    const me = currentStudent(req, false);
+    const mine = new Set(me ? store.studentBookings(me.id, from + 'T00:00')
+      .filter((b) => b.status === 'active').map((b) => b.slot_id) : []);
+    return {
+      slots: store.listSlots(from + 'T00:00', to + 'T00:00').filter(isOpen)
+        .map((s) => ({ ...publicSlot(s), mine: mine.has(s.id) })),
+    };
   });
 
+  // 學員用信箱登入（信箱需由老師在後台建立）
+  route('POST', /^\/api\/login$/, (req, url, body) => {
+    checkThrottle(req);
+    const email = normEmail(body.email);
+    const st = store.getStudentByEmail(email);
+    if (!st) { recordFail(req, 10); throw new HttpError(404, '找不到這個信箱的學員資料，請確認信箱或聯絡老師'); }
+    if (!st.active) throw new HttpError(403, '這個帳號目前已停用，請聯絡老師');
+    return { token: store.createSession('student', st.id, STUDENT_SESSION_MS), student: publicStudent(st) };
+  });
+
+  route('POST', /^\/api\/logout$/, (req) => {
+    const t = bearer(req);
+    if (t) store.deleteSession(t);
+    return { ok: true };
+  });
+
+  route('GET', /^\/api\/me$/, (req) => ({ student: publicStudent(currentStudent(req)) }));
+
   route('POST', /^\/api\/bookings$/, (req, url, body) => {
+    const me = currentStudent(req);
     const slotId = int(body.slotId, 1, Number.MAX_SAFE_INTEGER, '課程');
-    const name = str(body.name, 40, '姓名');
-    const phone = normPhone(body.phone);
     const note = str(body.note, 200, '備註', { required: false });
     const slot = store.getSlot(slotId);
     if (slot && slot.start_at.slice(0, 10) > T.addDays(today(), cfg.bookAheadDays)) {
       throw new HttpError(409, '這堂課尚未開放預約');
     }
-    const r = store.book({ slotId, name, phone, note, trial: body.trial === true, isOpen });
+    const r = store.book({ slotId, studentId: me.id, note, trial: false, bookedBy: 'student', isOpen });
     if (r.error) throw new HttpError(r.status, r.error);
-    return { status: 201, body: { code: r.booking.code, name: r.booking.name, trial: !!r.booking.trial, slot: publicSlot(r.slot) } };
+    return { status: 201, body: { id: r.booking.id, slot: publicSlot(r.slot) } };
   });
 
-  route('GET', /^\/api\/bookings$/, (req, url) => {
-    const phone = normPhone(url.searchParams.get('phone'));
-    const since = T.addDays(today(), -1) + 'T00:00';
+  route('GET', /^\/api\/my\/bookings$/, (req) => {
+    const me = currentStudent(req);
+    const since = T.addDays(today(), -14) + 'T00:00';
     return {
-      bookings: store.bookingsByPhone(phone, since).map((b) => ({
-        name: b.name, status: b.status, trial: !!b.trial, title: b.title, subtitle: b.subtitle, category: b.category,
-        startAt: b.start_at, durationMin: b.duration_min, past: b.start_at <= now(), slotCancelled: !!b.slot_cancelled,
-        cancellable: b.status === 'active' && !b.slot_cancelled && canCancel(b),
-        codeHint: b.code.slice(0, 2) + '••••',
+      student: publicStudent(me),
+      bookings: store.studentBookings(me.id, since).map((b) => ({
+        id: b.id, status: b.status, trial: !!b.trial, note: b.note, title: b.title, subtitle: b.subtitle,
+        category: b.category, startAt: b.start_at, durationMin: b.duration_min, past: b.start_at <= now(),
+        slotCancelled: !!b.slot_cancelled, cancellable: b.status === 'active' && !b.slot_cancelled && canCancel(b),
       })),
     };
   });
 
-  route('POST', /^\/api\/bookings\/cancel$/, (req, url, body) => {
-    const phone = normPhone(body.phone);
-    const code = str(body.code, 12, '預約代碼').toUpperCase();
-    const b = store.getBookingByCode(code);
-    if (!b || b.phone !== phone) throw new HttpError(404, '找不到這筆預約，請確認電話與預約代碼');
+  route('POST', /^\/api\/my\/bookings\/(\d+)\/cancel$/, (req, url, body, [, id]) => {
+    const me = currentStudent(req);
+    const b = store.getBooking(Number(id));
+    if (!b || b.student_id !== me.id) throw new HttpError(404, '找不到這筆預約');
     if (b.status !== 'active') throw new HttpError(409, '這筆預約已經取消了');
-    const slot = store.getSlot(b.slot_id);
-    if (!canCancel(slot)) throw new HttpError(409, `上課前 ${cfg.cancelHours} 小時內無法線上取消，請直接聯絡老師`);
+    if (!canCancel(store.getSlot(b.slot_id))) throw new HttpError(409, `上課前 ${cfg.cancelHours} 小時內無法線上取消，請直接聯絡老師`);
     store.cancelBooking(b.id);
     return { ok: true };
   });
 
   // ---------- 老師後台 API ----------
   route('POST', /^\/api\/admin\/login$/, (req, url, body) => {
-    const ip = req.socket.remoteAddress || '';
-    const f = loginFails.get(ip);
-    if (f && f.until > Date.now()) throw new HttpError(429, '嘗試次數過多，請稍後再試');
+    checkThrottle(req);
     const a = crypto.createHash('sha256').update(String(body.password ?? '')).digest();
     const b = crypto.createHash('sha256').update(cfg.adminPassword).digest();
-    if (!crypto.timingSafeEqual(a, b)) {
-      const count = (f?.count || 0) + 1;
-      loginFails.set(ip, { count, until: count >= 5 ? Date.now() + 5 * 60000 : 0 });
-      throw new HttpError(401, '密碼錯誤');
-    }
-    loginFails.delete(ip);
-    const token = crypto.randomBytes(24).toString('base64url');
-    sessions.set(token, Date.now() + SESSION_MS);
-    return { token };
+    if (!crypto.timingSafeEqual(a, b)) { recordFail(req, 5); throw new HttpError(401, '密碼錯誤'); }
+    loginFails.delete(req.socket.remoteAddress || '');
+    return { token: store.createSession('admin', null, ADMIN_SESSION_MS) };
   });
 
   route('POST', /^\/api\/admin\/logout$/, (req) => {
-    const m = /^Bearer (\S+)$/.exec(req.headers.authorization || '');
-    if (m) sessions.delete(m[1]);
+    const t = bearer(req);
+    if (t) store.deleteSession(t);
     return { ok: true };
+  });
+
+  // ----- 學員資料 -----
+  route('GET', /^\/api\/admin\/students$/, (req) => {
+    requireAdmin(req);
+    return {
+      students: store.listStudents(now()).map((st) => ({
+        ...publicStudent(st), note: st.note, active: !!st.active, createdAt: st.created_at, lastLogin: st.last_login,
+        upcoming: st.upcoming, attended: st.attended, lastClass: st.last_class,
+      })),
+    };
+  });
+
+  route('POST', /^\/api\/admin\/students$/, (req, url, body) => {
+    requireAdmin(req);
+    const input = parseStudent(body);
+    if (store.getStudentByEmail(input.email)) throw new HttpError(409, `信箱 ${input.email} 已經有學員資料了`);
+    return { status: 201, body: { id: store.createStudent(input) } };
+  });
+
+  // 一次貼上多位學員
+  route('POST', /^\/api\/admin\/students\/batch$/, (req, url, body) => {
+    requireAdmin(req);
+    if (!Array.isArray(body.students) || !body.students.length) throw new HttpError(400, '沒有學員資料');
+    if (body.students.length > 1000) throw new HttpError(400, '一次最多 1000 位');
+    const items = body.students.map((x, i) => {
+      try { return parseStudent(x || {}); }
+      catch (e) { throw new HttpError(400, `第 ${i + 1} 筆：${e.message}`); }
+    });
+    const emails = new Set();
+    for (const it of items) {
+      if (emails.has(it.email)) throw new HttpError(400, `信箱重複：${it.email}`);
+      emails.add(it.email);
+    }
+    return { status: 201, body: store.createStudents(items) };
+  });
+
+  route('PUT', /^\/api\/admin\/students\/(\d+)$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const input = parseStudent(body);
+    const other = store.getStudentByEmail(input.email);
+    if (other && other.id !== Number(id)) throw new HttpError(409, `信箱 ${input.email} 已經被 ${other.name} 使用`);
+    if (!store.updateStudent(Number(id), input)) throw new HttpError(404, '找不到這位學員');
+    return { ok: true };
+  });
+
+  route('POST', /^\/api\/admin\/students\/(\d+)\/(activate|deactivate)$/, (req, url, body, [, id, act]) => {
+    requireAdmin(req);
+    if (!store.setStudentActive(Number(id), act === 'activate')) throw new HttpError(404, '找不到這位學員');
+    return { ok: true };
+  });
+
+  route('DELETE', /^\/api\/admin\/students\/(\d+)$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const r = store.deleteStudent(Number(id));
+    if (r === null) throw new HttpError(404, '找不到這位學員');
+    if (r === false) throw new HttpError(409, '這位學員有預約紀錄，無法刪除，請改用「停用」');
+    return { ok: true };
+  });
+
+  route('GET', /^\/api\/admin\/students\/(\d+)\/bookings$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const st = store.getStudent(Number(id));
+    if (!st) throw new HttpError(404, '找不到這位學員');
+    return {
+      bookings: store.studentBookings(st.id, '0000').reverse().map((b) => ({
+        id: b.id, status: b.status, trial: !!b.trial, title: b.title, category: b.category, startAt: b.start_at,
+        durationMin: b.duration_min, slotCancelled: !!b.slot_cancelled, past: b.start_at <= now(),
+      })),
+    };
   });
 
   route('GET', /^\/api\/admin\/slots$/, (req, url) => {
@@ -219,8 +335,8 @@ function createApp(cfg) {
       slots: store.listSlots(from + 'T00:00', to + 'T00:00').map((s) => ({
         ...publicSlot(s), cancelled: !!s.cancelled, fromTemplate: s.template_id != null,
         bookings: store.slotBookings(s.id).map((b) => ({
-          id: b.id, name: b.name, phone: b.phone, note: b.note, code: b.code, trial: !!b.trial,
-          status: b.status, createdAt: b.created_at,
+          id: b.id, studentId: b.student_id, name: b.name, email: b.email, phone: b.phone, note: b.note,
+          trial: !!b.trial, bookedBy: b.booked_by, status: b.status, createdAt: b.created_at,
         })),
       })),
     };
@@ -269,13 +385,14 @@ function createApp(cfg) {
   // 老師幫學生代約（不受截止時間限制，但仍檢查名額）
   route('POST', /^\/api\/admin\/slots\/(\d+)\/bookings$/, (req, url, body, [, id]) => {
     requireAdmin(req);
+    const st = store.getStudent(int(body.studentId, 1, Number.MAX_SAFE_INTEGER, '學員'));
+    if (!st) throw new HttpError(404, '找不到這位學員');
     const r = store.book({
-      slotId: Number(id), name: str(body.name, 40, '姓名'), phone: normPhone(body.phone),
-      note: str(body.note, 200, '備註', { required: false }), trial: body.trial === true,
-      isOpen: (s) => !s.cancelled,
+      slotId: Number(id), studentId: st.id, note: str(body.note, 200, '備註', { required: false }),
+      trial: body.trial === true, bookedBy: 'admin', isOpen: (s) => !s.cancelled,
     });
     if (r.error) throw new HttpError(r.status, r.error);
-    return { status: 201, body: { code: r.booking.code } };
+    return { status: 201, body: { id: r.booking.id } };
   });
 
   // 固定課表

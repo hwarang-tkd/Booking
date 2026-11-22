@@ -16,7 +16,7 @@
 
   async function load() {
     try {
-      const r = await api(`/api/slots?days=${cfg.bookAheadDays + 1}`);
+      const r = await sapi(`/api/slots?days=${cfg.bookAheadDays + 1}`);
       all = r.slots;
       applyFilter();
     } catch (e) {
@@ -97,52 +97,60 @@
           ${s.subtitle ? `<div class="subtitle">${esc(s.subtitle)}</div>` : ''}
           ${s.note ? `<div class="note">${esc(s.note)}</div>` : ''}
           <div class="meta">
-            ${full ? '<span class="badge danger">已額滿</span>'
+            ${s.mine ? '<span class="badge ok">✓ 你已預約</span>'
+              : full ? '<span class="badge danger">已額滿</span>'
               : s.remaining <= 2 ? `<span class="badge warn">剩 ${s.remaining} 位</span>`
               : `<span class="badge ok">剩 ${s.remaining} 位</span>`}
             <span class="muted" style="font-size:.85rem">${s.booked}/${s.capacity} 人</span>
           </div>
           <div class="bar ${full ? 'full' : ''}"><i style="width:${pct}%"></i></div>
         </div>
-        <div class="actions"><button class="btn" ${full ? 'disabled' : ''}>${full ? '額滿' : '預約'}</button></div>`;
-      card.querySelector('button').onclick = () => openBooking(s);
+        <div class="actions">${s.mine
+          ? '<a class="btn secondary" href="/my">查看預約</a>'
+          : `<button class="btn" ${full ? 'disabled' : ''}>${full ? '額滿' : '預約'}</button>`}</div>`;
+      const btn = card.querySelector('button');
+      if (btn) btn.onclick = () => openBooking(s);
       list.appendChild(card);
     }
   }
 
-  function openBooking(s) {
+  async function openBooking(s) {
+    if (!auth.token) {
+      const st = await loginDialog('請先用你的信箱登入，再預約課程。');
+      if (!st) return;
+      await load(); // 重新載入，標示自己已預約的課
+      s = all.find((x) => x.id === s.id) || s;
+      if (s.mine) { toast('你已經預約過這堂課了'); return; }
+    }
     booking = s;
     const f = $('bookForm');
-    const saved = store('student') || {};
-    f.name.value = saved.name || '';
-    f.phone.value = saved.phone || '';
     f.note.value = '';
-    f.trial.checked = false;
     $('bookErr').classList.add('hidden');
+    $('bookWho').textContent = auth.student.name;
     $('bookSummary').innerHTML = `<b>${esc(s.title)}</b>${s.subtitle ? `　<span class="muted">${esc(s.subtitle)}</span>` : ''}<br>${fmtSlot(s)}`;
     $('bookDlg').showModal();
-    (f.name.value ? f.note : f.name).focus();
+    $('bookBtn').focus();
   }
+
+  $('switchUser').addEventListener('click', async (ev) => {
+    ev.preventDefault();
+    await sapi('/api/logout', { method: 'POST' }).catch(() => {});
+    auth.clear();
+    $('bookDlg').close();
+    openBooking(booking);
+  });
 
   $('bookForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const f = ev.target, btn = $('bookBtn');
     btn.disabled = true; btn.textContent = '送出中…';
     try {
-      const body = { slotId: booking.id, name: f.name.value, phone: f.phone.value, note: f.note.value, trial: f.trial.checked };
-      const r = await api('/api/bookings', { method: 'POST', body });
-      store('student', { name: body.name.trim(), phone: body.phone.trim() });
-      const mine = store('myCodes') || [];
-      mine.push({ code: r.code, startAt: r.slot.startAt, title: r.slot.title });
-      store('myCodes', mine.slice(-50));
+      const r = await sapi('/api/bookings', { method: 'POST', body: { slotId: booking.id, note: f.note.value } });
       $('bookDlg').close();
-      $('doneSummary').innerHTML = `<b>${esc(r.name)}</b>　${esc(r.slot.title)}${r.trial ? '（體驗課）' : ''}<br>${fmtSlot(r.slot)}`;
-      $('doneCode').textContent = r.code;
-      $('doneHint').textContent = cfg.cancelHours > 0
-        ? `如需取消，請於上課前 ${cfg.cancelHours} 小時到「我的預約」辦理。` : '如需取消，請到「我的預約」辦理。';
-      $('doneDlg').showModal();
+      toast(`✅ 已預約 ${fmtSlot(r.slot)}「${r.slot.title}」`);
       load();
     } catch (e) {
+      if (e.status === 401) { $('bookDlg').close(); openBooking(booking); return; }
       showError($('bookErr'), e.message);
       if (e.status === 409) load();
     } finally {

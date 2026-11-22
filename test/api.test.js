@@ -1,5 +1,8 @@
 'use strict';
 const { test, before, after, describe } = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const assert = require('node:assert/strict');
 const { createApp, loadConfig } = require('../server');
 const { DEFAULT_TEMPLATES } = require('../lib/schedule');
@@ -76,47 +79,88 @@ describe('API', () => {
     assert.ok(after2.every((s) => s.subtitle === 'Kids 8-12'));
   });
 
-  test('學生預約：名額、重複、額滿、體驗課、取消', async () => {
-    const slot = (await req('/api/slots?days=20')).data.slots.find((s) => s.title === '兒童班');
-    assert.equal(slot.remaining, 2);
+  let ming, hua, mei, mingToken, huaToken;
 
-    const a = await req('/api/bookings', { method: 'POST', body: { slotId: slot.id, name: '小明', phone: '0912-345-678', trial: true } });
-    assert.equal(a.status, 201);
-    assert.match(a.data.code, /^[A-Z2-9]{6}$/);
-    assert.equal(a.data.trial, true);
+  test('學員資料：新增、重複信箱、批次匯入', async () => {
+    const r = await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '小明', email: 'Ming@Example.com', phone: '0912-345-678' } });
+    assert.equal(r.status, 201);
+    ming = r.data.id;
+    assert.equal((await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '小明2', email: 'ming@example.com' } })).status, 409);
+    assert.equal((await req('/api/admin/students', { method: 'POST', auth: token, body: { name: 'x', email: 'not-an-email' } })).status, 400);
+    assert.equal((await req('/api/admin/students', { method: 'POST', body: { name: 'x', email: 'x@y.com' } })).status, 401);
 
-    const dup = await req('/api/bookings', { method: 'POST', body: { slotId: slot.id, name: '小明', phone: '0912345678' } });
-    assert.equal(dup.status, 409);
-    const b = await req('/api/bookings', { method: 'POST', body: { slotId: slot.id, name: '小華', phone: '0922000111' } });
+    const b = await req('/api/admin/students/batch', { method: 'POST', auth: token, body: { students: [
+      { name: '小華', email: 'hua@example.com' }, { name: '小美', email: 'mei@example.com', phone: '0933000111' },
+      { name: '小明', email: 'ming@example.com' },
+    ] } });
     assert.equal(b.status, 201);
-    const c = await req('/api/bookings', { method: 'POST', body: { slotId: slot.id, name: '小美', phone: '0933000111' } });
-    assert.equal(c.status, 409);
-    assert.equal(c.data.error, '這堂課已額滿');
-    assert.equal((await req('/api/bookings', { method: 'POST', body: { slotId: slot.id, name: '', phone: '123' } })).status, 400);
-
-    const mine = await req('/api/bookings?phone=0912345678');
-    assert.equal(mine.data.bookings.length, 1);
-    assert.equal(mine.data.bookings[0].trial, true);
-    assert.equal(mine.data.bookings[0].cancellable, true);
-
-    assert.equal((await req('/api/bookings/cancel', { method: 'POST', body: { phone: '0922000111', code: a.data.code } })).status, 404);
-    assert.equal((await req('/api/bookings/cancel', { method: 'POST', body: { phone: '0912345678', code: a.data.code.toLowerCase() } })).status, 200);
-    assert.equal((await req('/api/bookings/cancel', { method: 'POST', body: { phone: '0912345678', code: a.data.code } })).status, 409);
-    const again = (await req('/api/slots?days=20')).data.slots.find((s) => s.id === slot.id);
-    assert.equal(again.remaining, 1);
+    assert.deepEqual(b.data.created, ['hua@example.com', 'mei@example.com']);
+    assert.deepEqual(b.data.skipped, ['ming@example.com']);
+    const list = (await req('/api/admin/students', { auth: token })).data.students;
+    assert.equal(list.length, 3);
+    hua = list.find((x) => x.name === '小華').id;
+    mei = list.find((x) => x.name === '小美').id;
   });
 
-  test('停課：學生看不到也不能預約，已預約的人會看到停課；恢復後重新開放', async () => {
+  test('學員用信箱登入；未建立的信箱、停用的帳號不能登入', async () => {
+    assert.equal((await req('/api/login', { method: 'POST', body: { email: 'nobody@example.com' } })).status, 404);
+    const r = await req('/api/login', { method: 'POST', body: { email: '  MING@example.com ' } });
+    assert.equal(r.status, 200);
+    assert.equal(r.data.student.name, '小明');
+    mingToken = r.data.token;
+    assert.equal((await req('/api/me', { auth: mingToken })).data.student.email, 'ming@example.com');
+    assert.equal((await req('/api/me')).status, 401);
+    // 學員的登入不能進後台
+    assert.equal((await req('/api/admin/students', { auth: mingToken })).status, 401);
+    huaToken = (await req('/api/login', { method: 'POST', body: { email: 'hua@example.com' } })).data.token;
+
+    assert.equal((await req(`/api/admin/students/${mei}/deactivate`, { method: 'POST', auth: token })).status, 200);
+    assert.equal((await req('/api/login', { method: 'POST', body: { email: 'mei@example.com' } })).status, 403);
+    assert.equal((await req(`/api/admin/students/${mei}/activate`, { method: 'POST', auth: token })).status, 200);
+  });
+
+  test('學員預約：需要登入、名額、重複、額滿、取消', async () => {
+    const slot = (await req('/api/slots?days=20')).data.slots.find((s) => s.title === '兒童班');
+    assert.equal(slot.remaining, 2);
+    assert.equal((await req('/api/bookings', { method: 'POST', body: { slotId: slot.id } })).status, 401);
+
+    const a = await req('/api/bookings', { method: 'POST', auth: mingToken, body: { slotId: slot.id, note: '會晚到' } });
+    assert.equal(a.status, 201);
+    assert.equal(a.data.code, undefined); // 不再有預約代碼
+    assert.equal((await req('/api/bookings', { method: 'POST', auth: mingToken, body: { slotId: slot.id } })).status, 409);
+    // 登入後課表會標示自己預約的課
+    assert.equal((await req('/api/slots?days=20', { auth: mingToken })).data.slots.find((s) => s.id === slot.id).mine, true);
+    assert.equal((await req('/api/slots?days=20', { auth: huaToken })).data.slots.find((s) => s.id === slot.id).mine, false);
+
+    assert.equal((await req('/api/bookings', { method: 'POST', auth: huaToken, body: { slotId: slot.id } })).status, 201);
+    const meiToken = (await req('/api/login', { method: 'POST', body: { email: 'mei@example.com' } })).data.token;
+    const c = await req('/api/bookings', { method: 'POST', auth: meiToken, body: { slotId: slot.id } });
+    assert.equal(c.status, 409);
+    assert.equal(c.data.error, '這堂課已額滿');
+
+    const mine = (await req('/api/my/bookings', { auth: mingToken })).data.bookings;
+    assert.equal(mine.length, 1);
+    assert.equal(mine[0].cancellable, true);
+    // 不能取消別人的預約
+    assert.equal((await req(`/api/my/bookings/${mine[0].id}/cancel`, { method: 'POST', auth: huaToken })).status, 404);
+    assert.equal((await req(`/api/my/bookings/${mine[0].id}/cancel`, { method: 'POST', auth: mingToken })).status, 200);
+    assert.equal((await req(`/api/my/bookings/${mine[0].id}/cancel`, { method: 'POST', auth: mingToken })).status, 409);
+    assert.equal((await req('/api/slots?days=20')).data.slots.find((s) => s.id === slot.id).remaining, 1);
+
+    // 登出後 token 失效
+    assert.equal((await req('/api/logout', { method: 'POST', auth: meiToken })).status, 200);
+    assert.equal((await req('/api/me', { auth: meiToken })).status, 401);
+  });
+
+  test('停課：學員看不到也不能預約，已預約的人會看到停課；恢復後重新開放', async () => {
     const slot = (await req('/api/slots?days=20')).data.slots.find((s) => s.title === '兒童班');
     assert.equal((await req(`/api/admin/slots/${slot.id}/cancel`, { method: 'POST', auth: token })).status, 200);
     assert.ok(!(await req('/api/slots?days=20')).data.slots.some((s) => s.id === slot.id));
-    assert.equal((await req('/api/bookings', { method: 'POST', body: { slotId: slot.id, name: '阿強', phone: '0955111222' } })).status, 409);
-    const mine = (await req('/api/bookings?phone=0922000111')).data.bookings.find((b) => b.startAt === slot.startAt);
+    assert.equal((await req('/api/bookings', { method: 'POST', auth: mingToken, body: { slotId: slot.id } })).status, 409);
+    const mine = (await req('/api/my/bookings', { auth: huaToken })).data.bookings.find((b) => b.startAt === slot.startAt);
     assert.equal(mine.slotCancelled, true);
     assert.equal(mine.cancellable, false);
-    // 固定課表的課不能直接刪除（否則會被重新產生）
     assert.equal((await req(`/api/admin/slots/${slot.id}`, { method: 'DELETE', auth: token })).status, 409);
-    // 停課的課不會被重新產生出來
     assert.ok(!(await req('/api/slots?days=20')).data.slots.some((s) => s.startAt === slot.startAt && s.title === '兒童班'));
     assert.equal((await req(`/api/admin/slots/${slot.id}/restore`, { method: 'POST', auth: token })).status, 200);
     assert.ok((await req('/api/slots?days=20')).data.slots.some((s) => s.id === slot.id));
@@ -128,38 +172,52 @@ describe('API', () => {
       title: '急課', category: 'tkd', date: soon.slice(0, 10), time: soon.slice(11), duration: 60, capacity: 5,
     } });
     assert.equal(r.status, 201);
-    const bk = await req('/api/bookings', { method: 'POST', body: { slotId: r.data.id, name: '阿強', phone: '0955111222' } });
-    assert.equal(bk.status, 201);
-    assert.equal((await req('/api/bookings/cancel', { method: 'POST', body: { phone: '0955111222', code: bk.data.code } })).status, 409);
+    assert.equal((await req('/api/bookings', { method: 'POST', auth: mingToken, body: { slotId: r.data.id } })).status, 201);
+    const b = (await req('/api/my/bookings', { auth: mingToken })).data.bookings.find((x) => x.title === '急課');
+    assert.equal(b.cancellable, false);
+    assert.equal((await req(`/api/my/bookings/${b.id}/cancel`, { method: 'POST', auth: mingToken })).status, 409);
 
     const past = T.fromMs(T.toMs(T.nowLocal(TZ)) - 60 * 60000);
     const p = await req('/api/admin/slots', { method: 'POST', auth: token, body: {
       title: '舊課', date: past.slice(0, 10), time: past.slice(11), duration: 60, capacity: 5,
     } });
-    assert.equal((await req('/api/bookings', { method: 'POST', body: { slotId: p.data.id, name: '阿強', phone: '0955111222' } })).status, 409);
+    assert.equal((await req('/api/bookings', { method: 'POST', auth: mingToken, body: { slotId: p.data.id } })).status, 409);
     assert.equal((await req(`/api/admin/slots/${p.data.id}`, { method: 'DELETE', auth: token })).status, 200);
   });
 
-  test('後台：名單、修改名額、代約、刪除固定時段', async () => {
+  test('後台：名單、修改名額、代約、學員紀錄、刪除學員、刪除固定時段', async () => {
     const from = today(), to = T.addDays(from, 20);
     const { data } = await req(`/api/admin/slots?from=${from}&to=${to}`, { auth: token });
     const s = data.slots.find((x) => x.title === '兒童班' && x.booked === 1);
     assert.ok(s && s.fromTemplate);
     assert.equal(s.bookings.length, 2);
-    assert.ok(s.bookings.some((b) => b.trial));
+    assert.ok(s.bookings.some((b) => b.name === '小華' && b.email === 'hua@example.com' && b.status === 'active'));
 
     const shrink = await req(`/api/admin/slots/${s.id}`, { method: 'PUT', auth: token, body: {
       title: s.title, date: s.startAt.slice(0, 10), time: s.startAt.slice(11), duration: 60, capacity: 0,
     } });
     assert.equal(shrink.status, 400);
-    assert.equal((await req(`/api/admin/slots/${s.id}/bookings`, { method: 'POST', auth: token, body: { name: '小美', phone: '0933000111', trial: true } })).status, 201);
+    const add = await req(`/api/admin/slots/${s.id}/bookings`, { method: 'POST', auth: token, body: { studentId: mei, trial: true } });
+    assert.equal(add.status, 201);
+    const roster = (await req(`/api/admin/slots?from=${from}&to=${to}`, { auth: token })).data.slots.find((x) => x.id === s.id).bookings;
+    assert.ok(roster.some((b) => b.name === '小美' && b.trial && b.bookedBy === 'admin'));
+
+    const hist = await req(`/api/admin/students/${mei}/bookings`, { auth: token });
+    assert.equal(hist.data.bookings.length, 1);
+    // 有預約紀錄的學員不能刪除；沒有紀錄的可以
+    assert.equal((await req(`/api/admin/students/${mei}`, { method: 'DELETE', auth: token })).status, 409);
+    const tmp = await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '路人', email: 'tmp@example.com' } });
+    assert.equal((await req(`/api/admin/students/${tmp.data.id}`, { method: 'DELETE', auth: token })).status, 200);
+    // 編輯學員信箱：不能和別人重複
+    assert.equal((await req(`/api/admin/students/${hua}`, { method: 'PUT', auth: token, body: { name: '小華', email: 'ming@example.com' } })).status, 409);
+    assert.equal((await req(`/api/admin/students/${hua}`, { method: 'PUT', auth: token, body: { name: '小華', email: 'hua2@example.com' } })).status, 200);
+    assert.equal((await req('/api/login', { method: 'POST', body: { email: 'hua2@example.com' } })).status, 200);
 
     const { data: t } = await req('/api/admin/templates', { auth: token });
     const del = await req(`/api/admin/templates/${t.templates[0].id}`, { method: 'DELETE', auth: token });
     assert.equal(del.status, 200);
-    assert.equal(del.data.kept, 1); // 有人預約的那堂保留
-    const left = (await req('/api/slots?days=29')).data.slots.filter((x) => x.title === '兒童班');
-    assert.equal(left.length, 1);
+    assert.equal(del.data.kept, 1);
+    assert.equal((await req('/api/slots?days=29')).data.slots.filter((x) => x.title === '兒童班').length, 1);
   });
 
   test('靜態頁面與路徑安全', async () => {
@@ -168,6 +226,29 @@ describe('API', () => {
     }
     assert.notEqual((await req('/..%2fserver.js')).status, 200);
   });
+});
+
+test('舊版資料庫（預約代碼）可以升級', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const { openDb, createStore } = require('../lib/db');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bk-')), 'old.db');
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE slots (id INTEGER PRIMARY KEY, title TEXT NOT NULL, start_at TEXT NOT NULL, duration_min INTEGER NOT NULL,
+      capacity INTEGER NOT NULL, note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE bookings (id INTEGER PRIMARY KEY, slot_id INTEGER NOT NULL REFERENCES slots(id), name TEXT NOT NULL,
+      phone TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', code TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT, cancelled_at TEXT);
+    CREATE INDEX idx_bookings_slot ON bookings(slot_id);
+    INSERT INTO slots (title, start_at, duration_min, capacity) VALUES ('舊課', '2030-01-01T10:00', 60, 5);
+    INSERT INTO bookings (slot_id, name, phone, code) VALUES (1, 'a', '0912345678', 'ABCDEF');`);
+  old.close();
+  const db = openDb(file);
+  const st = createStore(db);
+  assert.equal(st.getSlot(1).booked, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bookings_legacy').get().n, 1);
+  const sid = st.createStudent({ name: 'a', email: 'a@b.co', phone: '', note: '' });
+  assert.ok(st.book({ slotId: 1, studentId: sid, note: '', isOpen: () => true }).booking);
+  db.close();
 });
 
 test('時間工具', () => {

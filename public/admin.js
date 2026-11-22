@@ -83,9 +83,10 @@
   // ---------- 分頁 ----------
   document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
-    for (const t of ['schedule', 'templates', 'extra']) $('tab-' + t).classList.toggle('hidden', b.dataset.tab !== t);
+    for (const t of ['schedule', 'students', 'templates', 'extra']) $('tab-' + t).classList.toggle('hidden', b.dataset.tab !== t);
     if (b.dataset.tab === 'schedule') loadSchedule();
     if (b.dataset.tab === 'templates') loadTemplates();
+    if (b.dataset.tab === 'students') loadStudents();
   }));
 
   // ---------- 課表與名單 ----------
@@ -174,8 +175,10 @@
         <tr class="${b.status}">
           <td class="num">${b.status === 'active' ? ++n : ''}</td>
           <td><b>${esc(b.name)}</b> ${b.trial ? '<span class="badge warn">體驗</span>' : ''}
+            ${b.bookedBy === 'admin' ? '<span class="badge">代約</span>' : ''}
             ${b.note ? `<div class="muted" style="font-size:.85rem">${esc(b.note)}</div>` : ''}</td>
-          <td><a href="tel:${esc(b.phone)}">${esc(b.phone)}</a><div class="muted" style="font-size:.8rem">${esc(b.code)}</div></td>
+          <td>${b.phone ? `<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>` : ''}
+            <div class="muted" style="font-size:.8rem;word-break:break-all">${esc(b.email)}</div></td>
           <td>${b.status === 'active'
             ? `<button class="btn ghost small" data-cancel="${b.id}">取消</button>`
             : '<span class="badge">已取消</span>'}</td>
@@ -238,9 +241,12 @@
     } catch (e) { showError($('editErr'), e.message); }
   });
 
-  function openAdd(s) {
+  async function openAdd(s) {
     adding = s;
     $('addForm').reset();
+    if (!students.length) await loadStudents(true);
+    $('studentOptions').innerHTML = students.filter((x) => x.active)
+      .map((x) => `<option value="${esc(x.email)}">${esc(x.name)}</option>`).join('');
     $('addSummary').innerHTML = `<b>${esc(s.title)}</b><br>${fmtSlot(s)}　目前 ${s.booked}/${s.capacity}`;
     $('addErr').classList.add('hidden');
     $('addDlg').showModal();
@@ -249,13 +255,153 @@
     ev.preventDefault();
     const f = ev.target;
     try {
-      const r = await call(`/api/admin/slots/${adding.id}/bookings`, { method: 'POST', body: {
-        name: f.name.value, phone: f.phone.value, note: f.note.value, trial: f.trial.checked,
+      const who = f.who.value.trim().toLowerCase();
+      const matches = students.filter((x) => x.active && (x.email.toLowerCase() === who || x.name.toLowerCase() === who));
+      if (matches.length !== 1) {
+        throw new Error(matches.length ? '有同名學員，請改輸入信箱' : '找不到這位學員，請先到「學員資料」新增');
+      }
+      await call(`/api/admin/slots/${adding.id}/bookings`, { method: 'POST', body: {
+        studentId: matches[0].id, note: f.note.value, trial: f.trial.checked,
       } });
       openRosters.add(adding.id);
-      $('addDlg').close(); toast(`已加入，預約代碼 ${r.code}`); loadSchedule();
+      $('addDlg').close(); toast(`已幫 ${matches[0].name} 預約`); loadSchedule();
     } catch (e) { showError($('addErr'), e.message); }
   });
+
+  // ---------- 學員資料 ----------
+  let students = [], editingStudent = null;
+
+  async function loadStudents(quiet) {
+    try {
+      students = (await call('/api/admin/students')).students;
+      if (!quiet) renderStudents();
+    } catch (e) {
+      if (e.status !== 401 && !quiet) $('students').innerHTML = `<div class="alert error">${esc(e.message)}</div>`;
+    }
+  }
+
+  function renderStudents() {
+    const box = $('students');
+    const kw = $('stSearch').value.trim().toLowerCase();
+    const list = students.filter((x) => !kw || [x.name, x.email, x.phone, x.note].some((v) => (v || '').toLowerCase().includes(kw)));
+    const activeN = students.filter((x) => x.active).length;
+    $('stCount').textContent = `共 ${students.length} 位學員（使用中 ${activeN} 位）` + (kw ? `，符合搜尋 ${list.length} 位` : '');
+    if (!students.length) {
+      box.innerHTML = '<div class="card empty">還沒有學員資料<br>按「＋ 新增學員」或「批次匯入」開始建立</div>';
+      return;
+    }
+    box.innerHTML = '';
+    for (const x of list) {
+      const el = document.createElement('div');
+      el.className = 'card' + (x.active ? '' : ' past');
+      el.style.cssText = 'margin-bottom:8px;padding:12px 14px';
+      el.innerHTML = `
+        <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <b>${esc(x.name)}</b> ${x.active ? '' : '<span class="badge danger">已停用</span>'}
+            <div class="muted" style="font-size:.88rem;word-break:break-all">${esc(x.email)}${x.phone ? `・<a href="tel:${esc(x.phone)}">${esc(x.phone)}</a>` : ''}</div>
+            ${x.note ? `<div style="font-size:.88rem;margin-top:2px">📝 ${esc(x.note)}</div>` : ''}
+            <div class="muted" style="font-size:.82rem;margin-top:4px">
+              即將上課 ${x.upcoming} 堂・已上 ${x.attended} 堂${x.lastClass ? `・最近一次 ${fmtDate(x.lastClass.slice(0, 10))}` : ''}${x.lastLogin ? '' : '・尚未登入過'}
+            </div>
+          </div>
+          <div class="btns" style="margin:0">
+            <button class="btn secondary small" data-act="hist">紀錄</button>
+            <button class="btn secondary small" data-act="edit">編輯</button>
+            ${x.active ? '<button class="btn danger small" data-act="off">停用</button>'
+              : '<button class="btn secondary small" data-act="on">啟用</button>'}
+            ${x.upcoming + x.attended === 0 ? '<button class="btn danger small" data-act="del">刪除</button>' : ''}
+          </div>
+        </div>`;
+      const act = (n, fn) => { const b = el.querySelector(`[data-act="${n}"]`); if (b) b.onclick = fn; };
+      act('edit', () => openStudent(x));
+      act('hist', () => openHistory(x));
+      act('off', async () => {
+        if (!confirm(`停用 ${x.name}？停用後無法登入約課（已預約的課不受影響）。`)) return;
+        try { await call(`/api/admin/students/${x.id}/deactivate`, { method: 'POST' }); toast('已停用'); loadStudents(); } catch (e) { fail(e); }
+      });
+      act('on', async () => {
+        try { await call(`/api/admin/students/${x.id}/activate`, { method: 'POST' }); toast('已啟用'); loadStudents(); } catch (e) { fail(e); }
+      });
+      act('del', async () => {
+        if (!confirm(`刪除 ${x.name} 的學員資料？`)) return;
+        try { await call(`/api/admin/students/${x.id}`, { method: 'DELETE' }); toast('已刪除'); loadStudents(); } catch (e) { fail(e); }
+      });
+      box.appendChild(el);
+    }
+    if (!list.length) box.innerHTML = '<div class="card empty">沒有符合的學員</div>';
+  }
+  $('stSearch').addEventListener('input', renderStudents);
+
+  function openStudent(x) {
+    editingStudent = x || null;
+    const f = $('stForm');
+    f.reset();
+    $('stTitle').textContent = x ? '編輯學員' : '新增學員';
+    if (x) { f.name.value = x.name; f.email.value = x.email; f.phone.value = x.phone; f.note.value = x.note; }
+    $('stErr').classList.add('hidden');
+    $('stDlg').showModal();
+    f.name.focus();
+  }
+  $('stAdd').onclick = () => openStudent(null);
+  $('stForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    const body = { name: f.name.value, email: f.email.value, phone: f.phone.value, note: f.note.value };
+    try {
+      if (editingStudent) await call(`/api/admin/students/${editingStudent.id}`, { method: 'PUT', body });
+      else await call('/api/admin/students', { method: 'POST', body });
+      $('stDlg').close();
+      toast(editingStudent ? '已儲存' : `已新增 ${body.name.trim()}，請告訴學員用 ${body.email.trim()} 登入`);
+      loadStudents();
+    } catch (e) { showError($('stErr'), e.message); }
+  });
+
+  // 批次匯入：每行「姓名, 信箱, 電話」，也接受 Tab（從試算表貼上）
+  const parseImport = (text) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
+    const parts = l.split(/\t|,|，|、|;/).map((x) => x.trim());
+    const email = parts.find((x) => x.includes('@')) || '';
+    const rest = parts.filter((x) => x && x !== email);
+    const phone = rest.find((x) => /^[+\d][\d\s-]{6,}$/.test(x)) || '';
+    const name = rest.find((x) => x !== phone) || '';
+    return { name, email, phone };
+  }).filter((r) => !/^(姓名|name)$/i.test(r.name) || r.email); // 略過標題列
+  $('stImport').onclick = () => {
+    $('importForm').reset(); $('importPreview').textContent = ''; $('importErr').classList.add('hidden');
+    $('importDlg').showModal();
+  };
+  $('importForm').text.addEventListener('input', (ev) => {
+    const rows = parseImport(ev.target.value);
+    const bad = rows.filter((r) => !r.name || !r.email).length;
+    $('importPreview').textContent = rows.length ? `共 ${rows.length} 位${bad ? `，其中 ${bad} 行缺少姓名或信箱` : ''}` : '';
+  });
+  $('importForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const rows = parseImport(ev.target.text.value);
+    try {
+      const r = await call('/api/admin/students/batch', { method: 'POST', body: { students: rows } });
+      $('importDlg').close();
+      alert(`已新增 ${r.created.length} 位學員` + (r.skipped.length ? `\n\n以下信箱已經存在，已略過：\n${r.skipped.join('\n')}` : ''));
+      loadStudents();
+    } catch (e) { showError($('importErr'), e.message); }
+  });
+
+  async function openHistory(x) {
+    $('histTitle').textContent = `${x.name} 的預約紀錄`;
+    $('histBody').innerHTML = '<div class="empty">載入中…</div>';
+    $('histDlg').showModal();
+    try {
+      const { bookings } = await call(`/api/admin/students/${x.id}/bookings`);
+      $('histBody').innerHTML = bookings.length ? `<div class="roster" style="border:none;margin:0;padding:0"><table><tbody>${bookings.map((b) => `
+        <tr class="${b.status}">
+          <td><span class="tag" style="${catStyle(b.category)}">&nbsp;</span></td>
+          <td>${fmtDate(b.startAt.slice(0, 10))} ${b.startAt.slice(11)}<br><b>${esc(b.title)}</b></td>
+          <td>${b.status === 'cancelled' ? '<span class="badge">已取消</span>' : b.slotCancelled ? '<span class="badge danger">停課</span>'
+            : b.past ? '<span class="badge">已上課</span>' : '<span class="badge ok">已預約</span>'}
+            ${b.trial ? '<span class="badge warn">體驗</span>' : ''}</td>
+        </tr>`).join('')}</tbody></table></div>` : '<div class="empty">還沒有預約紀錄</div>';
+    } catch (e) { $('histBody').innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
+  }
 
   // ---------- 固定課表 ----------
   async function loadTemplates() {

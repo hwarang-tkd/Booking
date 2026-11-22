@@ -12,9 +12,8 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="/"><img src="/logo.png" alt=""><span data-school>花郎武道館</span></a>
-      <nav class="nav">
+      <nav class="nav" data-student>
         <a href="/" aria-current="page">預約課程</a>
-        <a href="/my">我的預約</a>
         <a href="/info">課表與收費</a>
       </nav>
     </div>
@@ -29,23 +28,16 @@
     <div id="list" class="stack" aria-live="polite"><div class="empty">載入中…</div></div>
   </main>
 
-  <!-- 預約表單 -->
+  <!-- 確認預約 -->
   <dialog id="bookDlg">
     <form id="bookForm" method="dialog">
-      <div class="dlg-head"><h3>預約課程</h3></div>
+      <div class="dlg-head"><h3>確認預約</h3></div>
       <div class="dlg-body stack">
         <div class="summary" id="bookSummary"></div>
-        <label class="field">學生姓名
-          <input type="text" name="name" maxlength="40" required autocomplete="name">
-        </label>
-        <label class="field">聯絡電話 <span class="hint">（查詢、取消預約時使用）</span>
-          <input type="tel" name="phone" required inputmode="tel" autocomplete="tel" placeholder="0912345678">
-        </label>
-        <label class="check"><input type="checkbox" name="trial">
-          <span>這是我第一次來，預約<b>體驗課</b>（200 元）</span>
-        </label>
-        <label class="field">備註 <span class="hint">（選填）</span>
-          <textarea name="note" maxlength="200" placeholder="例如：小朋友年齡、目前帶別、需要借道服…"></textarea>
+        <p style="margin:0">學員：<b id="bookWho"></b>
+          <a href="#" id="switchUser" style="font-size:.88rem;margin-left:6px">不是你？</a></p>
+        <label class="field">給老師的備註 <span class="hint">（選填）</span>
+          <input type="text" name="note" maxlength="200" placeholder="例如：會晚 10 分鐘到">
         </label>
         <div id="bookErr" class="hidden"></div>
       </div>
@@ -54,22 +46,6 @@
         <button type="submit" class="btn" id="bookBtn">確認預約</button>
       </div>
     </form>
-  </dialog>
-
-  <!-- 預約成功 -->
-  <dialog id="doneDlg">
-    <div class="dlg-head"><h3>🎉 預約成功！</h3></div>
-    <div class="dlg-body">
-      <div class="summary" id="doneSummary"></div>
-      <p style="margin:14px 0 0">你的預約代碼（取消預約時需要，建議截圖保存）：</p>
-      <div class="code-box" id="doneCode"></div>
-      <p class="muted" style="margin:0;font-size:.9rem" id="doneHint"></p>
-      <p class="callout" style="margin:12px 0 0">請於該期課程的第一堂課前完成繳費，收費方式請見<a href="/info#rates">「課表與收費」</a>。</p>
-    </div>
-    <div class="dlg-foot">
-      <a class="btn secondary" href="/my">查看我的預約</a>
-      <button type="button" class="btn" data-close>完成</button>
-    </div>
   </dialog>
 
   <footer class="site"></footer>

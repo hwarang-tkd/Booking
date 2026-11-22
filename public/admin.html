@@ -37,6 +37,7 @@
     <section id="appView" class="hidden">
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected="true" data-tab="schedule">課表與名單</button>
+        <button role="tab" aria-selected="false" data-tab="students">學員資料</button>
         <button role="tab" aria-selected="false" data-tab="templates">固定課表</button>
         <button role="tab" aria-selected="false" data-tab="extra">加開課程</button>
       </div>
@@ -50,6 +51,18 @@
           <span class="range" id="range"></span>
         </div>
         <div id="schedule" aria-live="polite"></div>
+      </div>
+
+      <!-- 學員資料 -->
+      <div id="tab-students" class="hidden">
+        <p class="sub">學員用這裡登記的<b>信箱</b>登入網站約課。停用的學員無法登入。</p>
+        <div class="toolbar">
+          <input type="search" id="stSearch" placeholder="搜尋姓名、信箱、電話" style="flex:1;min-width:180px;margin:0;min-height:36px">
+          <button class="btn small" id="stAdd">＋ 新增學員</button>
+          <button class="btn secondary small" id="stImport">批次匯入</button>
+        </div>
+        <p class="muted" id="stCount" style="font-size:.9rem;margin:0 0 8px"></p>
+        <div id="students" aria-live="polite"></div>
       </div>
 
       <!-- 固定課表 -->
@@ -128,14 +141,16 @@
     </form>
   </dialog>
 
-  <!-- 代學生預約 -->
+  <!-- 代學員預約 -->
   <dialog id="addDlg">
     <form id="addForm" method="dialog">
-      <div class="dlg-head"><h3>幫學生預約</h3></div>
+      <div class="dlg-head"><h3>幫學員預約</h3></div>
       <div class="dlg-body stack">
         <div class="summary" id="addSummary"></div>
-        <label class="field">學生姓名 <input type="text" name="name" maxlength="40" required></label>
-        <label class="field">聯絡電話 <input type="tel" name="phone" required inputmode="tel"></label>
+        <label class="field">學員 <span class="hint">（輸入姓名或信箱搜尋）</span>
+          <input type="text" name="who" list="studentOptions" required autocomplete="off">
+        </label>
+        <datalist id="studentOptions"></datalist>
         <label class="check"><input type="checkbox" name="trial"><span>體驗課</span></label>
         <label class="field">備註 <span class="hint">（選填）</span><input type="text" name="note" maxlength="200"></label>
         <div id="addErr" class="hidden"></div>
@@ -145,6 +160,52 @@
         <button type="submit" class="btn">加入</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- 新增 / 編輯學員 -->
+  <dialog id="stDlg">
+    <form id="stForm" method="dialog">
+      <div class="dlg-head"><h3 id="stTitle">新增學員</h3></div>
+      <div class="dlg-body stack">
+        <label class="field">姓名 <input type="text" name="name" maxlength="40" required></label>
+        <label class="field">電子信箱 <span class="hint">（學員用來登入）</span>
+          <input type="email" name="email" required autocomplete="off">
+        </label>
+        <label class="field">電話 <span class="hint">（選填）</span><input type="tel" name="phone" inputmode="tel"></label>
+        <label class="field">老師備註 <span class="hint">（選填，學員看不到，例如：家長姓名、帶別、方案）</span>
+          <textarea name="note" maxlength="300"></textarea>
+        </label>
+        <div id="stErr" class="hidden"></div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="btn secondary" data-close>取消</button>
+        <button type="submit" class="btn">儲存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 批次匯入 -->
+  <dialog id="importDlg">
+    <form id="importForm" method="dialog">
+      <div class="dlg-head"><h3>批次匯入學員</h3></div>
+      <div class="dlg-body stack">
+        <p style="margin:0;font-size:.92rem">每行一位：<b>姓名, 信箱, 電話</b>（電話可省略）。可以直接從 Excel／Google 試算表複製貼上。</p>
+        <textarea name="text" rows="8" required placeholder="王小明, ming@example.com, 0912345678&#10;陳小華, hua@example.com"></textarea>
+        <p class="muted" id="importPreview" style="margin:0;font-size:.9rem"></p>
+        <div id="importErr" class="hidden"></div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="btn secondary" data-close>取消</button>
+        <button type="submit" class="btn">匯入</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 學員預約紀錄 -->
+  <dialog id="histDlg">
+    <div class="dlg-head"><h3 id="histTitle"></h3></div>
+    <div class="dlg-body" id="histBody" style="max-height:60vh;overflow:auto"></div>
+    <div class="dlg-foot"><button type="button" class="btn" data-close>關閉</button></div>
   </dialog>
 
   <script src="/common.js"></script>

@@ -75,3 +75,103 @@ async function applyConfig() {
   document.title = `${document.title}｜${cfg.schoolName}`;
   return cfg;
 }
+
+// ---------- 學員登入（用老師建立的信箱） ----------
+const auth = {
+  get token() { return store('studentToken'); },
+  get student() { return store('student'); },
+  save(token, student) { store('studentToken', token); store('student', student); renderUserNav(); },
+  clear() { store('studentToken', null); store('student', null); renderUserNav(); },
+};
+
+/** 以學員身分呼叫 API；登入失效時清除狀態。 */
+async function sapi(path, opts = {}) {
+  try {
+    return await api(path, { ...opts, token: auth.token || undefined });
+  } catch (e) {
+    if (e.status === 401 && auth.token) auth.clear();
+    throw e;
+  }
+}
+
+function loginFormHtml(id) {
+  return `
+    <label class="field">電子信箱
+      <input type="email" name="email" required autocomplete="email" inputmode="email" placeholder="name@example.com">
+    </label>
+    <p class="muted" style="font-size:.88rem;margin:0">請輸入老師幫你建立學員資料時登記的信箱。還沒有資料的話，請先聯絡老師。</p>
+    <div id="${id}" class="hidden"></div>`;
+}
+
+async function doLogin(form, errEl) {
+  const btn = form.querySelector('[type=submit]');
+  btn.disabled = true;
+  try {
+    const r = await api('/api/login', { method: 'POST', body: { email: form.email.value } });
+    auth.save(r.token, r.student);
+    return r.student;
+  } catch (e) {
+    showError(errEl, e.message);
+    return null;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** 顯示登入對話框；登入成功回傳學員資料，取消回傳 null。 */
+function loginDialog(message) {
+  let dlg = document.getElementById('loginDlg');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'loginDlg';
+    dlg.innerHTML = `
+      <form method="dialog">
+        <div class="dlg-head"><h3>學員登入</h3></div>
+        <div class="dlg-body stack"><p id="loginDlgMsg" class="hidden" style="margin:0"></p>${loginFormHtml('loginDlgErr')}</div>
+        <div class="dlg-foot">
+          <button type="button" class="btn secondary" data-cancel>取消</button>
+          <button type="submit" class="btn">登入</button>
+        </div>
+      </form>`;
+    document.body.appendChild(dlg);
+  }
+  const form = dlg.querySelector('form');
+  const msg = dlg.querySelector('#loginDlgMsg');
+  msg.textContent = message || '';
+  msg.classList.toggle('hidden', !message);
+  dlg.querySelector('#loginDlgErr').classList.add('hidden');
+  form.reset();
+  return new Promise((resolve) => {
+    form.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const st = await doLogin(form, dlg.querySelector('#loginDlgErr'));
+      if (st) { dlg.close(); resolve(st); }
+    };
+    const cancel = () => { dlg.close(); resolve(null); };
+    dlg.querySelector('[data-cancel]').onclick = cancel;
+    dlg.oncancel = (ev) => { ev.preventDefault(); cancel(); };
+    dlg.showModal();
+    form.email.focus();
+  });
+}
+
+/** 頁首右側：已登入顯示姓名，未登入顯示「登入」。 */
+function renderUserNav() {
+  const nav = document.querySelector('.topbar .nav[data-student]');
+  if (!nav) return;
+  nav.querySelector('.user')?.remove();
+  const a = document.createElement('a');
+  a.className = 'user';
+  const st = auth.student;
+  if (st) {
+    a.href = '/my';
+    a.textContent = '👤 ' + st.name;
+    if (location.pathname === '/my') a.setAttribute('aria-current', 'page');
+  } else {
+    a.href = '#';
+    a.textContent = '登入';
+    a.onclick = async (ev) => { ev.preventDefault(); if (await loginDialog()) location.reload(); };
+  }
+  nav.appendChild(a);
+}
+document.addEventListener('DOMContentLoaded', renderUserNav);
