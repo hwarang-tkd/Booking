@@ -499,7 +499,8 @@
     editingPass = null;
     const f = $('passForm');
     f.reset();
-    f.startDate.value = todayStr();
+    f.purchaseDate.value = f.startDate.value = todayStr();
+    f.purchaseDate.max = todayStr();
     f.endDate.value = addMonths(todayStr(), 1);
     setCats(GROUP);
     $('passFormTitle').textContent = '新增堂數卡';
@@ -526,7 +527,8 @@
             <div style="flex:1;min-width:180px">
               <b>${esc(p.name)}</b> <span class="badge ${cls}">${label}</span>
               <div style="font-size:1.05rem;margin-top:2px"><b>剩 ${p.remaining}</b> <span class="muted">/ 共 ${p.total} 堂（已用 ${p.used}）</span></div>
-              <div class="muted" style="font-size:.85rem">${fmtDate(p.startDate)} – ${fmtDate(p.endDate)}・${esc(catsText(p.categories))}</div>
+              <div class="muted" style="font-size:.85rem">購買日 ${fmtDate(p.purchaseDate)}・有效 ${fmtDate(p.startDate)} – ${fmtDate(p.endDate)}</div>
+              <div class="muted" style="font-size:.85rem">${esc(catsText(p.categories))}</div>
               ${p.note ? `<div style="font-size:.85rem">📝 ${esc(p.note)}</div>` : ''}
             </div>
             <div class="btns" style="margin:0">
@@ -541,6 +543,7 @@
           editingPass = p;
           const f = $('passForm');
           f.name.value = p.name; f.total.value = p.total; f.startDate.value = p.startDate; f.endDate.value = p.endDate;
+          f.purchaseDate.value = p.purchaseDate || p.startDate;
           f.note.value = p.note; setCats(p.categories);
           $('passFormTitle').textContent = `編輯「${p.name}」`;
           $('passSave').textContent = '儲存';
@@ -569,7 +572,8 @@
     ev.preventDefault();
     const f = ev.target;
     const body = {
-      name: f.name.value, total: Number(f.total.value), startDate: f.startDate.value, endDate: f.endDate.value, note: f.note.value,
+      name: f.name.value, total: Number(f.total.value), purchaseDate: f.purchaseDate.value,
+      startDate: f.startDate.value, endDate: f.endDate.value, note: f.note.value,
       categories: [...$('passCats').querySelectorAll('input:checked')].map((i) => i.value),
     };
     try {

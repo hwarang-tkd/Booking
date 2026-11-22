@@ -149,12 +149,15 @@ function createApp(cfg) {
   }
   const publicPass = (p) => ({
     id: p.id, name: p.name, total: p.total, used: p.used, remaining: Math.max(0, p.total - p.used),
-    startDate: p.start_date, endDate: p.end_date, categories: p.categories ? p.categories.split(',') : [],
+    purchaseDate: p.purchase_date, startDate: p.start_date, endDate: p.end_date, categories: p.categories ? p.categories.split(',') : [],
     note: p.note, status: passStatus(p, today()),
   });
   function parsePass(b) {
     if (!T.isValidDate(b.startDate) || !T.isValidDate(b.endDate)) throw new HttpError(400, '請填寫正確的開始與到期日期');
     if (b.endDate < b.startDate) throw new HttpError(400, '到期日不能早於開始日');
+    const purchaseDate = b.purchaseDate || today();
+    if (!T.isValidDate(purchaseDate)) throw new HttpError(400, '購買日格式錯誤');
+    if (purchaseDate > today()) throw new HttpError(400, '購買日不能晚於今天');
     const cats = Array.isArray(b.categories) ? b.categories.filter((c) => CATEGORY_IDS.includes(c)) : [];
     return {
       name: str(b.name, 40, '方案名稱'),
@@ -162,6 +165,7 @@ function createApp(cfg) {
       startDate: b.startDate, endDate: b.endDate,
       categories: [...new Set(cats)].join(','),
       note: str(b.note, 200, '備註', { required: false }),
+      purchaseDate,
     };
   }
   const publicStudent = (st) => ({ id: st.id, name: st.name, email: st.email, phone: st.phone });

@@ -312,6 +312,15 @@ describe('API', () => {
       .find((x) => x.id === s4).bookings;
     assert.equal(roster[0].passName, null);
 
+    // 購買日：預設今天、可指定、不能晚於今天
+    const pp = await passes();
+    assert.ok(pp.every((p) => p.purchaseDate === d));
+    const withDate = await mk({ name: '補登', total: 2, purchaseDate: T.addDays(d, -10), startDate: d, endDate: T.addDays(d, 5) });
+    assert.equal(withDate.status, 201);
+    assert.equal((await passes()).find((p) => p.id === withDate.data.id).purchaseDate, T.addDays(d, -10));
+    assert.equal((await mk({ name: 'x', total: 1, purchaseDate: T.addDays(d, 1), startDate: d, endDate: d })).status, 400);
+    await req(`/api/admin/passes/${withDate.data.id}/void`, { method: 'POST', auth: token });
+
     // 學員列表摘要
     const me = (await req('/api/admin/students', { auth: token })).data.students.find((x) => x.id === st);
     assert.equal(me.credits.remaining, 0);

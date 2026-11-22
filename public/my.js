@@ -76,7 +76,8 @@
           <span class="muted" style="font-size:.9rem;font-weight:400">／共 ${p.total} 堂</span></div>
         <div class="bar"><i style="width:${pct}%"></i></div>
         <div class="${live && days <= 7 ? '' : 'muted'}" style="font-size:.88rem;margin-top:6px">
-          ${p.status === 'future' ? `${fmtDate(p.startDate)} 開始・` : ''}有效期限至 ${fmtDate(p.endDate)}
+          ${p.status === 'future' ? `${fmtDate(p.startDate)} 開始・` : ''}有效期限至 ${fmtDate(p.endDate)}<br>
+          <span class="muted">購買日 ${fmtDate(p.purchaseDate)}</span>
           ${live ? (days <= 7 ? `<b style="color:var(--warn)">（還有 ${days} 天，記得用完喔）</b>` : `（還有 ${days} 天）`) : ''}
         </div>
         ${p.categories.length ? `<div class="muted" style="font-size:.82rem">適用：${p.categories.map(catName).join('、')}</div>` : ''}
