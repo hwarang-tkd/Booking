@@ -127,9 +127,27 @@
     f.note.value = '';
     $('bookErr').classList.add('hidden');
     $('bookWho').textContent = auth.student.name;
+    const passBox = $('bookPass'), btn = $('bookBtn');
+    passBox.textContent = '確認堂數中…';
+    btn.disabled = true;
     $('bookSummary').innerHTML = `<b>${esc(s.title)}</b>${s.subtitle ? `　<span class="muted">${esc(s.subtitle)}</span>` : ''}<br>${fmtSlot(s)}`;
     $('bookDlg').showModal();
-    $('bookBtn').focus();
+    try {
+      const { pass, required } = await sapi(`/api/bookings/preview?slotId=${s.id}`);
+      if (pass) {
+        passBox.innerHTML = `🎫 將使用「<b>${esc(pass.name)}</b>」，預約後剩 <b>${pass.remaining - 1}</b> 堂（${fmtDate(pass.endDate)} 到期）`;
+        btn.disabled = false;
+      } else if (required) {
+        passBox.innerHTML = '⚠️ 你目前<b>沒有可用的堂數</b>（可能已用完、已過期，或方案不包含這類課程），請聯絡老師購買或續約。';
+      } else {
+        passBox.textContent = '這堂課不會扣堂數。';
+        btn.disabled = false;
+      }
+    } catch (e) {
+      passBox.textContent = e.message;
+      if (e.status === 401) { $('bookDlg').close(); return openBooking(s); }
+    }
+    if (!btn.disabled) btn.focus();
   }
 
   $('switchUser').addEventListener('click', async (ev) => {
@@ -147,7 +165,7 @@
     try {
       const r = await sapi('/api/bookings', { method: 'POST', body: { slotId: booking.id, note: f.note.value } });
       $('bookDlg').close();
-      toast(`✅ 已預約 ${fmtSlot(r.slot)}「${r.slot.title}」`);
+      toast(`✅ 已預約 ${fmtSlot(r.slot)}「${r.slot.title}」` + (r.pass ? `，「${r.pass.name}」剩 ${r.pass.remaining} 堂` : ''));
       load();
     } catch (e) {
       if (e.status === 401) { $('bookDlg').close(); openBooking(booking); return; }

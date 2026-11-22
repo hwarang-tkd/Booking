@@ -35,6 +35,7 @@
 
     <!-- 後台 -->
     <section id="appView" class="hidden">
+      <div id="bdayBanner" class="card hidden" style="margin-bottom:14px;padding:12px 14px"></div>
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected="true" data-tab="schedule">課表與名單</button>
         <button role="tab" aria-selected="false" data-tab="students">學員資料</button>
@@ -60,6 +61,13 @@
           <input type="search" id="stSearch" placeholder="搜尋姓名、信箱、電話" style="flex:1;min-width:180px;margin:0;min-height:36px">
           <button class="btn small" id="stAdd">＋ 新增學員</button>
           <button class="btn secondary small" id="stImport">批次匯入</button>
+        </div>
+        <div class="filters" id="stFilters" role="group" aria-label="篩選學員">
+          <button type="button" data-f="all" aria-pressed="true">全部</button>
+          <button type="button" data-f="nocredit">沒有堂數</button>
+          <button type="button" data-f="expiring">7 天內到期／剩 1 堂</button>
+          <button type="button" data-f="bday">本月壽星 🎂</button>
+          <button type="button" data-f="inactive">已停用</button>
         </div>
         <p class="muted" id="stCount" style="font-size:.9rem;margin:0 0 8px"></p>
         <div id="students" aria-live="polite"></div>
@@ -151,8 +159,10 @@
           <input type="text" name="who" list="studentOptions" required autocomplete="off">
         </label>
         <datalist id="studentOptions"></datalist>
-        <label class="check"><input type="checkbox" name="trial"><span>體驗課</span></label>
+        <label class="check"><input type="checkbox" name="trial"><span>體驗課（不扣堂數）</span></label>
+        <label class="check"><input type="checkbox" name="nopass"><span>不扣堂數（例如補課、贈送）</span></label>
         <label class="field">備註 <span class="hint">（選填）</span><input type="text" name="note" maxlength="200"></label>
+        <p class="muted" style="font-size:.85rem;margin:0">會自動從學員最快到期的堂數卡扣一堂；沒有堂數時仍可代約，名單會標示「未扣堂」。</p>
         <div id="addErr" class="hidden"></div>
       </div>
       <div class="dlg-foot">
@@ -171,7 +181,10 @@
         <label class="field">電子信箱 <span class="hint">（學員用來登入）</span>
           <input type="email" name="email" required autocomplete="off">
         </label>
-        <label class="field">電話 <span class="hint">（選填）</span><input type="tel" name="phone" inputmode="tel"></label>
+        <div class="row">
+          <label class="field">電話 <span class="hint">（選填）</span><input type="tel" name="phone" inputmode="tel"></label>
+          <label class="field">生日 <span class="hint">（選填）</span><input type="date" name="birthday" min="1900-01-01"></label>
+        </div>
         <label class="field">老師備註 <span class="hint">（選填，學員看不到，例如：家長姓名、帶別、方案）</span>
           <textarea name="note" maxlength="300"></textarea>
         </label>
@@ -189,7 +202,7 @@
     <form id="importForm" method="dialog">
       <div class="dlg-head"><h3>批次匯入學員</h3></div>
       <div class="dlg-body stack">
-        <p style="margin:0;font-size:.92rem">每行一位：<b>姓名, 信箱, 電話</b>（電話可省略）。可以直接從 Excel／Google 試算表複製貼上。</p>
+        <p style="margin:0;font-size:.92rem">每行一位：<b>姓名, 信箱, 電話, 生日</b>（電話、生日可省略；生日寫成 2015-03-21 或 2015/3/21）。可以直接從 Excel／Google 試算表複製貼上。</p>
         <textarea name="text" rows="8" required placeholder="王小明, ming@example.com, 0912345678&#10;陳小華, hua@example.com"></textarea>
         <p class="muted" id="importPreview" style="margin:0;font-size:.9rem"></p>
         <div id="importErr" class="hidden"></div>
@@ -199,6 +212,40 @@
         <button type="submit" class="btn">匯入</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- 堂數卡 -->
+  <dialog id="passDlg" style="width:min(560px, calc(100vw - 32px))">
+    <div class="dlg-head"><h3 id="passTitle">堂數</h3></div>
+    <div class="dlg-body stack" style="max-height:72vh;overflow:auto">
+      <div id="passList"></div>
+      <form id="passForm" class="card stack" style="box-shadow:none;background:var(--surface-2)">
+        <b id="passFormTitle">新增堂數卡</b>
+        <div>
+          <span class="muted" style="font-size:.85rem">快速套用收費方案：</span>
+          <div class="filters" id="presets" style="flex-wrap:wrap;overflow:visible;padding-bottom:0"></div>
+        </div>
+        <div class="row">
+          <label class="field">方案名稱 <input type="text" name="name" maxlength="40" required placeholder="例如：8 堂月卡"></label>
+          <label class="field">堂數 <input type="number" name="total" min="1" max="500" required value="8"></label>
+        </div>
+        <div class="row">
+          <label class="field">開始日 <input type="date" name="startDate" required></label>
+          <label class="field">到期日 <span class="hint">（含當天）</span><input type="date" name="endDate" required></label>
+        </div>
+        <div>
+          <span class="field" style="font-weight:600;font-size:.9rem">適用課程 <span class="hint" style="font-weight:400;color:var(--muted)">（都不勾 = 全部課程）</span></span>
+          <div class="weekdays" id="passCats" style="gap:6px"></div>
+        </div>
+        <label class="field">備註 <span class="hint">（選填，例如繳費方式、金額）</span><input type="text" name="note" maxlength="200"></label>
+        <div id="passErr" class="hidden"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" class="btn secondary hidden" id="passCancelEdit">取消編輯</button>
+          <button type="submit" class="btn" id="passSave">新增</button>
+        </div>
+      </form>
+    </div>
+    <div class="dlg-foot"><button type="button" class="btn secondary" data-close>關閉</button></div>
   </dialog>
 
   <!-- 學員預約紀錄 -->

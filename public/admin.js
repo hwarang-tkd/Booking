@@ -61,6 +61,8 @@
     $('appView').classList.remove('hidden');
     $('logout').classList.remove('hidden');
     loadSchedule();
+    loadBirthdays();
+    loadStudents(true);
   }
 
   $('loginForm').addEventListener('submit', async (ev) => {
@@ -176,6 +178,9 @@
           <td class="num">${b.status === 'active' ? ++n : ''}</td>
           <td><b>${esc(b.name)}</b> ${b.trial ? '<span class="badge warn">體驗</span>' : ''}
             ${b.bookedBy === 'admin' ? '<span class="badge">代約</span>' : ''}
+            ${b.birthdayToday ? '<span class="badge warn" title="今天生日">🎂 生日</span>' : ''}
+            ${b.status === 'active' ? (b.passName ? `<div class="muted" style="font-size:.8rem">🎫 ${esc(b.passName)}</div>`
+              : b.trial ? '' : '<span class="badge danger" title="這堂沒有扣到堂數，可能需要收費">未扣堂</span>') : ''}
             ${b.note ? `<div class="muted" style="font-size:.85rem">${esc(b.note)}</div>` : ''}</td>
           <td>${b.phone ? `<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>` : ''}
             <div class="muted" style="font-size:.8rem;word-break:break-all">${esc(b.email)}</div></td>
@@ -260,11 +265,14 @@
       if (matches.length !== 1) {
         throw new Error(matches.length ? '有同名學員，請改輸入信箱' : '找不到這位學員，請先到「學員資料」新增');
       }
-      await call(`/api/admin/slots/${adding.id}/bookings`, { method: 'POST', body: {
-        studentId: matches[0].id, note: f.note.value, trial: f.trial.checked,
+      const r = await call(`/api/admin/slots/${adding.id}/bookings`, { method: 'POST', body: {
+        studentId: matches[0].id, note: f.note.value, trial: f.trial.checked, usePass: f.nopass.checked ? 'none' : 'auto',
       } });
       openRosters.add(adding.id);
-      $('addDlg').close(); toast(`已幫 ${matches[0].name} 預約`); loadSchedule();
+      $('addDlg').close();
+      toast(r.pass ? `已幫 ${matches[0].name} 預約，扣「${r.pass.name}」，剩 ${r.pass.remaining} 堂`
+        : `已幫 ${matches[0].name} 預約（未扣堂數）`);
+      loadSchedule(); loadStudents(true);
     } catch (e) { showError($('addErr'), e.message); }
   });
 
@@ -280,12 +288,45 @@
     }
   }
 
+  let stFilter = 'all';
+  const todayStr = () => (now || cfg.now).slice(0, 10);
+  const daysUntil = (date) => Math.round((toMs(date + 'T00:00') - toMs(todayStr() + 'T00:00')) / 86400000);
+  const isBdayMonth = (x) => !!x.birthday && x.birthday.slice(5, 7) === todayStr().slice(5, 7);
+  const ageNow = (b) => {
+    const t = todayStr();
+    return Number(t.slice(0, 4)) - Number(b.slice(0, 4)) - (t.slice(5) < b.slice(5) ? 1 : 0);
+  };
+  const FILTERS = {
+    all: () => true,
+    nocredit: (x) => x.active && x.credits.remaining === 0,
+    expiring: (x) => x.active && x.credits.remaining > 0 && (x.credits.remaining <= 1 || daysUntil(x.credits.nextExpiry) <= 7),
+    bday: (x) => x.active && isBdayMonth(x),
+    inactive: (x) => !x.active,
+  };
+  document.querySelectorAll('#stFilters [data-f]').forEach((b) => b.addEventListener('click', () => {
+    stFilter = b.dataset.f;
+    document.querySelectorAll('#stFilters [data-f]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    renderStudents();
+  }));
+
+  function creditLine(x) {
+    const c = x.credits;
+    if (!c.remaining) {
+      return `<span class="badge danger">🎫 沒有可用堂數</span>${c.future ? ` <span class="muted">（另有 ${c.future} 堂尚未開始）</span>` : ''}`;
+    }
+    const left = daysUntil(c.nextExpiry);
+    const warn = c.remaining <= 1 || left <= 7;
+    return `<span class="badge ${warn ? 'warn' : 'ok'}">🎫 剩 ${c.remaining} 堂</span>
+      <span class="${left <= 7 ? '' : 'muted'}">${fmtDate(c.nextExpiry)} 到期${left <= 7 ? `（${left === 0 ? '今天' : `還有 ${left} 天`}）` : ''}</span>`;
+  }
+
   function renderStudents() {
     const box = $('students');
     const kw = $('stSearch').value.trim().toLowerCase();
-    const list = students.filter((x) => !kw || [x.name, x.email, x.phone, x.note].some((v) => (v || '').toLowerCase().includes(kw)));
+    const list = students.filter(FILTERS[stFilter])
+      .filter((x) => !kw || [x.name, x.email, x.phone, x.note].some((v) => (v || '').toLowerCase().includes(kw)));
     const activeN = students.filter((x) => x.active).length;
-    $('stCount').textContent = `共 ${students.length} 位學員（使用中 ${activeN} 位）` + (kw ? `，符合搜尋 ${list.length} 位` : '');
+    $('stCount').textContent = `共 ${students.length} 位學員（使用中 ${activeN} 位）` + (kw || stFilter !== 'all' ? `，符合條件 ${list.length} 位` : '');
     if (!students.length) {
       box.innerHTML = '<div class="card empty">還沒有學員資料<br>按「＋ 新增學員」或「批次匯入」開始建立</div>';
       return;
@@ -299,13 +340,16 @@
         <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
           <div style="flex:1;min-width:200px">
             <b>${esc(x.name)}</b> ${x.active ? '' : '<span class="badge danger">已停用</span>'}
+            ${x.birthday ? `<span class="${isBdayMonth(x) ? 'badge warn' : 'muted'}" style="font-size:.82rem">🎂 ${Number(x.birthday.slice(5, 7))}/${Number(x.birthday.slice(8))}（${ageNow(x.birthday)} 歲）${isBdayMonth(x) ? ' 本月壽星' : ''}</span>` : ''}
             <div class="muted" style="font-size:.88rem;word-break:break-all">${esc(x.email)}${x.phone ? `・<a href="tel:${esc(x.phone)}">${esc(x.phone)}</a>` : ''}</div>
             ${x.note ? `<div style="font-size:.88rem;margin-top:2px">📝 ${esc(x.note)}</div>` : ''}
+            ${x.active ? `<div style="font-size:.85rem;margin-top:6px">${creditLine(x)}</div>` : ''}
             <div class="muted" style="font-size:.82rem;margin-top:4px">
               即將上課 ${x.upcoming} 堂・已上 ${x.attended} 堂${x.lastClass ? `・最近一次 ${fmtDate(x.lastClass.slice(0, 10))}` : ''}${x.lastLogin ? '' : '・尚未登入過'}
             </div>
           </div>
           <div class="btns" style="margin:0">
+            <button class="btn small" data-act="pass">堂數</button>
             <button class="btn secondary small" data-act="hist">紀錄</button>
             <button class="btn secondary small" data-act="edit">編輯</button>
             ${x.active ? '<button class="btn danger small" data-act="off">停用</button>'
@@ -316,6 +360,7 @@
       const act = (n, fn) => { const b = el.querySelector(`[data-act="${n}"]`); if (b) b.onclick = fn; };
       act('edit', () => openStudent(x));
       act('hist', () => openHistory(x));
+      act('pass', () => openPasses(x));
       act('off', async () => {
         if (!confirm(`停用 ${x.name}？停用後無法登入約課（已預約的課不受影響）。`)) return;
         try { await call(`/api/admin/students/${x.id}/deactivate`, { method: 'POST' }); toast('已停用'); loadStudents(); } catch (e) { fail(e); }
@@ -338,7 +383,8 @@
     const f = $('stForm');
     f.reset();
     $('stTitle').textContent = x ? '編輯學員' : '新增學員';
-    if (x) { f.name.value = x.name; f.email.value = x.email; f.phone.value = x.phone; f.note.value = x.note; }
+    f.birthday.max = todayStr();
+    if (x) { f.name.value = x.name; f.email.value = x.email; f.phone.value = x.phone; f.note.value = x.note; f.birthday.value = x.birthday || ''; }
     $('stErr').classList.add('hidden');
     $('stDlg').showModal();
     f.name.focus();
@@ -347,24 +393,25 @@
   $('stForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const f = ev.target;
-    const body = { name: f.name.value, email: f.email.value, phone: f.phone.value, note: f.note.value };
+    const body = { name: f.name.value, email: f.email.value, phone: f.phone.value, note: f.note.value, birthday: f.birthday.value };
     try {
       if (editingStudent) await call(`/api/admin/students/${editingStudent.id}`, { method: 'PUT', body });
       else await call('/api/admin/students', { method: 'POST', body });
       $('stDlg').close();
       toast(editingStudent ? '已儲存' : `已新增 ${body.name.trim()}，請告訴學員用 ${body.email.trim()} 登入`);
-      loadStudents();
+      loadStudents(); loadBirthdays();
     } catch (e) { showError($('stErr'), e.message); }
   });
 
-  // 批次匯入：每行「姓名, 信箱, 電話」，也接受 Tab（從試算表貼上）
+  // 批次匯入：每行「姓名, 信箱, 電話, 生日」，也接受 Tab（從試算表貼上）
   const parseImport = (text) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
     const parts = l.split(/\t|,|，|、|;/).map((x) => x.trim());
     const email = parts.find((x) => x.includes('@')) || '';
-    const rest = parts.filter((x) => x && x !== email);
+    const birthday = parts.find((x) => /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(x)) || '';
+    const rest = parts.filter((x) => x && x !== email && x !== birthday);
     const phone = rest.find((x) => /^[+\d][\d\s-]{6,}$/.test(x)) || '';
     const name = rest.find((x) => x !== phone) || '';
-    return { name, email, phone };
+    return { name, email, phone, birthday };
   }).filter((r) => !/^(姓名|name)$/i.test(r.name) || r.email); // 略過標題列
   $('stImport').onclick = () => {
     $('importForm').reset(); $('importPreview').textContent = ''; $('importErr').classList.add('hidden');
@@ -382,7 +429,7 @@
       const r = await call('/api/admin/students/batch', { method: 'POST', body: { students: rows } });
       $('importDlg').close();
       alert(`已新增 ${r.created.length} 位學員` + (r.skipped.length ? `\n\n以下信箱已經存在，已略過：\n${r.skipped.join('\n')}` : ''));
-      loadStudents();
+      loadStudents(); loadBirthdays();
     } catch (e) { showError($('importErr'), e.message); }
   });
 
@@ -398,9 +445,156 @@
           <td>${fmtDate(b.startAt.slice(0, 10))} ${b.startAt.slice(11)}<br><b>${esc(b.title)}</b></td>
           <td>${b.status === 'cancelled' ? '<span class="badge">已取消</span>' : b.slotCancelled ? '<span class="badge danger">停課</span>'
             : b.past ? '<span class="badge">已上課</span>' : '<span class="badge ok">已預約</span>'}
-            ${b.trial ? '<span class="badge warn">體驗</span>' : ''}</td>
+            ${b.trial ? '<span class="badge warn">體驗</span>' : ''}
+            ${b.status === 'active' && !b.slotCancelled ? (b.passName ? `<div class="muted" style="font-size:.8rem">🎫 ${esc(b.passName)}</div>`
+              : b.trial ? '' : '<span class="badge danger">未扣堂</span>') : ''}</td>
         </tr>`).join('')}</tbody></table></div>` : '<div class="empty">還沒有預約紀錄</div>';
     } catch (e) { $('histBody').innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
+  }
+
+  // ---------- 堂數卡 ----------
+  const GROUP = ['tkd', 'kids', 'combat', 'blackbelt'];
+  const PRESETS = [
+    { label: '體驗課 1 堂（200）', name: '體驗課', total: 1, months: 1, cats: [] },
+    { label: '4 堂月卡（2,000）', name: '4 堂月卡', total: 4, months: 1, cats: GROUP },
+    { label: '8 堂月卡（2,600）', name: '8 堂月卡', total: 8, months: 1, cats: GROUP },
+    { label: '12 堂月卡（3,200）', name: '12 堂月卡', total: 12, months: 1, cats: GROUP },
+    { label: '單堂（600）', name: '單堂', total: 1, months: 1, cats: GROUP },
+    { label: '幼兒／期班', name: '期班', total: 8, months: 1, cats: ['little'] },
+    { label: '私人課 1 小時（1,200）', name: '私人課 1 小時', total: 1, months: 1, cats: ['private'] },
+    { label: '私人課 5 小時（5,000）', name: '私人課 5 小時', total: 5, months: 3, cats: ['private'] },
+  ];
+  // 加 n 個月再減一天（例如 11/25 開始的月卡到 12/24）；月底自動調整
+  const addMonths = (date, n) => {
+    let y = Number(date.slice(0, 4)), m = Number(date.slice(5, 7)) + n;
+    y += Math.floor((m - 1) / 12); m = ((m - 1) % 12) + 1;
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const d = Math.min(Number(date.slice(8)), last);
+    return addDays(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`, -1);
+  };
+  const STATUS = { active: ['ok', '使用中'], future: ['', '尚未開始'], used: ['', '已用完'], expired: ['', '已過期'], void: ['danger', '已作廢'] };
+  let passStudent = null, editingPass = null;
+
+  $('passCats').innerHTML = cfg.categories.filter((c) => c.id !== 'other').map((c) =>
+    `<label style="width:auto;padding:0 10px;font-size:.85rem;gap:6px"><input type="checkbox" value="${c.id}"><i style="width:10px;height:10px;border-radius:50%;background:${catColor(c.id)}"></i>${esc(c.name)}</label>`).join('');
+  $('presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-preset="${i}">${esc(p.label)}</button>`).join('');
+  $('presets').querySelectorAll('[data-preset]').forEach((b) => b.onclick = () => {
+    const p = PRESETS[b.dataset.preset], f = $('passForm');
+    f.name.value = p.name; f.total.value = p.total;
+    if (!f.startDate.value) f.startDate.value = todayStr();
+    f.endDate.value = addMonths(f.startDate.value, p.months);
+    setCats(p.cats);
+  });
+  const setCats = (cats) => $('passCats').querySelectorAll('input').forEach((i) => { i.checked = cats.includes(i.value); });
+  const catsText = (cats) => cats.length ? cats.map(catName).join('、') : '全部課程';
+
+  async function openPasses(x) {
+    passStudent = x;
+    $('passTitle').textContent = `${x.name} 的堂數`;
+    resetPassForm();
+    $('passDlg').showModal();
+    loadPasses();
+  }
+  function resetPassForm() {
+    editingPass = null;
+    const f = $('passForm');
+    f.reset();
+    f.startDate.value = todayStr();
+    f.endDate.value = addMonths(todayStr(), 1);
+    setCats(GROUP);
+    $('passFormTitle').textContent = '新增堂數卡';
+    $('passSave').textContent = '新增';
+    $('passCancelEdit').classList.add('hidden');
+    $('passErr').classList.add('hidden');
+  }
+  $('passCancelEdit').onclick = resetPassForm;
+
+  async function loadPasses() {
+    const box = $('passList');
+    box.innerHTML = '<div class="empty">載入中…</div>';
+    try {
+      const { passes } = await call(`/api/admin/students/${passStudent.id}/passes`);
+      if (!passes.length) { box.innerHTML = '<div class="muted" style="padding:4px 0 8px">還沒有堂數卡，從下方新增。</div>'; return; }
+      box.innerHTML = '';
+      for (const p of passes) {
+        const [cls, label] = STATUS[p.status];
+        const el = document.createElement('div');
+        el.className = 'card' + (p.status === 'active' || p.status === 'future' ? '' : ' past');
+        el.style.cssText = 'margin-bottom:8px;padding:10px 12px;box-shadow:none';
+        el.innerHTML = `
+          <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
+            <div style="flex:1;min-width:180px">
+              <b>${esc(p.name)}</b> <span class="badge ${cls}">${label}</span>
+              <div style="font-size:1.05rem;margin-top:2px"><b>剩 ${p.remaining}</b> <span class="muted">/ 共 ${p.total} 堂（已用 ${p.used}）</span></div>
+              <div class="muted" style="font-size:.85rem">${fmtDate(p.startDate)} – ${fmtDate(p.endDate)}・${esc(catsText(p.categories))}</div>
+              ${p.note ? `<div style="font-size:.85rem">📝 ${esc(p.note)}</div>` : ''}
+            </div>
+            <div class="btns" style="margin:0">
+              <button class="btn secondary small" data-a="edit">編輯</button>
+              ${p.status === 'void' ? '<button class="btn secondary small" data-a="restore">恢復</button>'
+                : '<button class="btn danger small" data-a="void">作廢</button>'}
+              ${p.used === 0 ? '<button class="btn danger small" data-a="del">刪除</button>' : ''}
+            </div>
+          </div>`;
+        const a = (n, fn) => { const b = el.querySelector(`[data-a="${n}"]`); if (b) b.onclick = fn; };
+        a('edit', () => {
+          editingPass = p;
+          const f = $('passForm');
+          f.name.value = p.name; f.total.value = p.total; f.startDate.value = p.startDate; f.endDate.value = p.endDate;
+          f.note.value = p.note; setCats(p.categories);
+          $('passFormTitle').textContent = `編輯「${p.name}」`;
+          $('passSave').textContent = '儲存';
+          $('passCancelEdit').classList.remove('hidden');
+          $('passErr').classList.add('hidden');
+          f.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+        const after = () => { loadPasses(); loadStudents(); };
+        a('void', async () => {
+          if (!confirm(`作廢「${p.name}」？作廢後剩下的 ${p.remaining} 堂不能再用（已約的課不受影響）。`)) return;
+          try { await call(`/api/admin/passes/${p.id}/void`, { method: 'POST' }); toast('已作廢'); after(); } catch (e) { fail(e); }
+        });
+        a('restore', async () => {
+          try { await call(`/api/admin/passes/${p.id}/restore`, { method: 'POST' }); toast('已恢復'); after(); } catch (e) { fail(e); }
+        });
+        a('del', async () => {
+          if (!confirm(`刪除「${p.name}」？`)) return;
+          try { await call(`/api/admin/passes/${p.id}`, { method: 'DELETE' }); toast('已刪除'); after(); } catch (e) { fail(e); }
+        });
+        box.appendChild(el);
+      }
+    } catch (e) { if (e.status !== 401) box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
+  }
+
+  $('passForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    const body = {
+      name: f.name.value, total: Number(f.total.value), startDate: f.startDate.value, endDate: f.endDate.value, note: f.note.value,
+      categories: [...$('passCats').querySelectorAll('input:checked')].map((i) => i.value),
+    };
+    try {
+      if (editingPass) await call(`/api/admin/passes/${editingPass.id}`, { method: 'PUT', body });
+      else await call(`/api/admin/students/${passStudent.id}/passes`, { method: 'POST', body });
+      toast(editingPass ? '已儲存' : `已幫 ${passStudent.name} 開「${body.name.trim()}」${body.total} 堂`);
+      resetPassForm(); loadPasses(); loadStudents();
+    } catch (e) { showError($('passErr'), e.message); }
+  });
+
+  // ---------- 當月壽星 ----------
+  async function loadBirthdays() {
+    const box = $('bdayBanner');
+    try {
+      const r = await call('/api/admin/birthdays');
+      if (!r.students.length) { box.classList.add('hidden'); return; }
+      const m = Number(r.month.slice(5));
+      const todays = r.students.filter((x) => x.isToday);
+      box.innerHTML = `<div style="font-weight:700;margin-bottom:4px">🎂 ${m} 月壽星（${r.students.length} 位）
+          ${todays.length ? `<span class="badge warn" style="margin-left:4px">今天生日：${todays.map((x) => esc(x.name)).join('、')}</span>` : ''}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.92rem">${r.students.map((x) => `
+          <span class="${x.passed && !x.isToday ? 'muted' : ''}">${x.isToday ? '🎉 ' : ''}<b>${esc(x.name)}</b>
+            ${m}/${Number(x.day.slice(8))}・滿 ${x.age} 歲</span>`).join('')}</div>`;
+      box.classList.remove('hidden');
+    } catch { box.classList.add('hidden'); }
   }
 
   // ---------- 固定課表 ----------

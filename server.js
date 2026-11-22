@@ -3,7 +3,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { openDb, createStore } = require('./lib/db');
+const { openDb, createStore, passStatus } = require('./lib/db');
 const { CATEGORIES, CATEGORY_IDS, DEFAULT_TEMPLATES } = require('./lib/schedule');
 const T = require('./lib/time');
 
@@ -34,6 +34,7 @@ function loadConfig(env = process.env) {
     bookCutoffMinutes: num(env.BOOK_CUTOFF_MINUTES, 0),
     bookAheadDays: num(env.BOOK_AHEAD_DAYS, 28) || 28,
     seedSchedule: env.SEED_SCHEDULE !== '0',
+    requirePass: env.REQUIRE_PASS !== '0', // 學員自己約課時需要有可用堂數
   };
 }
 
@@ -146,6 +147,23 @@ function createApp(cfg) {
     if (required) throw new HttpError(401, '請先用信箱登入');
     return null;
   }
+  const publicPass = (p) => ({
+    id: p.id, name: p.name, total: p.total, used: p.used, remaining: Math.max(0, p.total - p.used),
+    startDate: p.start_date, endDate: p.end_date, categories: p.categories ? p.categories.split(',') : [],
+    note: p.note, status: passStatus(p, today()),
+  });
+  function parsePass(b) {
+    if (!T.isValidDate(b.startDate) || !T.isValidDate(b.endDate)) throw new HttpError(400, '請填寫正確的開始與到期日期');
+    if (b.endDate < b.startDate) throw new HttpError(400, '到期日不能早於開始日');
+    const cats = Array.isArray(b.categories) ? b.categories.filter((c) => CATEGORY_IDS.includes(c)) : [];
+    return {
+      name: str(b.name, 40, '方案名稱'),
+      total: int(b.total, 1, 500, '堂數'),
+      startDate: b.startDate, endDate: b.endDate,
+      categories: [...new Set(cats)].join(','),
+      note: str(b.note, 200, '備註', { required: false }),
+    };
+  }
   const publicStudent = (st) => ({ id: st.id, name: st.name, email: st.email, phone: st.phone });
   function parseStudent(b) {
     return {
@@ -153,8 +171,23 @@ function createApp(cfg) {
       email: normEmail(b.email),
       phone: normPhone(b.phone),
       note: str(b.note, 300, '備註', { required: false }),
+      birthday: parseBirthday(b.birthday),
     };
   }
+  function parseBirthday(v) {
+    const raw = String(v ?? '').trim();
+    if (!raw) return '';
+    const m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(raw);
+    const d = m && `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    if (!d || !T.isValidDate(d) || d > today() || d < '1900-01-01') throw new HttpError(400, `生日格式不正確：${raw}（例如 2015-03-21）`);
+    return d;
+  }
+  // 年齡（以某天為準）
+  const ageOn = (birthday, date) => {
+    let a = Number(date.slice(0, 4)) - Number(birthday.slice(0, 4));
+    if (date.slice(5) < birthday.slice(5)) a--;
+    return a;
+  };
 
   const routes = [];
   const route = (method, pattern, handler) => routes.push({ method, pattern, handler });
@@ -214,9 +247,22 @@ function createApp(cfg) {
     if (slot && slot.start_at.slice(0, 10) > T.addDays(today(), cfg.bookAheadDays)) {
       throw new HttpError(409, '這堂課尚未開放預約');
     }
-    const r = store.book({ slotId, studentId: me.id, note, trial: false, bookedBy: 'student', isOpen });
+    const r = store.book({ slotId, studentId: me.id, note, trial: false, bookedBy: 'student', isOpen,
+      usePass: 'auto', requirePass: cfg.requirePass });
     if (r.error) throw new HttpError(r.status, r.error);
-    return { status: 201, body: { id: r.booking.id, slot: publicSlot(r.slot) } };
+    return { status: 201, body: { id: r.booking.id, slot: publicSlot(r.slot), pass: r.pass && publicPass(r.pass) } };
+  });
+
+  // 預約前先看會扣哪張卡
+  route('GET', /^\/api\/bookings\/preview$/, (req, url) => {
+    const me = currentStudent(req);
+    const pass = store.previewPass(Number(url.searchParams.get('slotId')), me.id);
+    return { pass: pass && publicPass(pass), required: cfg.requirePass };
+  });
+
+  route('GET', /^\/api\/my\/passes$/, (req) => {
+    const me = currentStudent(req);
+    return { passes: store.listPasses(me.id).filter((p) => !p.voided).map(publicPass) };
   });
 
   route('GET', /^\/api\/my\/bookings$/, (req) => {
@@ -225,7 +271,7 @@ function createApp(cfg) {
     return {
       student: publicStudent(me),
       bookings: store.studentBookings(me.id, since).map((b) => ({
-        id: b.id, status: b.status, trial: !!b.trial, note: b.note, title: b.title, subtitle: b.subtitle,
+        id: b.id, status: b.status, trial: !!b.trial, note: b.note, passName: b.pass_name, title: b.title, subtitle: b.subtitle,
         category: b.category, startAt: b.start_at, durationMin: b.duration_min, past: b.start_at <= now(),
         slotCancelled: !!b.slot_cancelled, cancellable: b.status === 'active' && !b.slot_cancelled && canCancel(b),
       })),
@@ -262,9 +308,11 @@ function createApp(cfg) {
   // ----- 學員資料 -----
   route('GET', /^\/api\/admin\/students$/, (req) => {
     requireAdmin(req);
+    const summary = store.passSummary(today());
     return {
       students: store.listStudents(now()).map((st) => ({
-        ...publicStudent(st), note: st.note, active: !!st.active, createdAt: st.created_at, lastLogin: st.last_login,
+        credits: summary[st.id] || { remaining: 0, nextExpiry: null, future: 0 },
+        ...publicStudent(st), note: st.note, birthday: st.birthday, active: !!st.active, createdAt: st.created_at, lastLogin: st.last_login,
         upcoming: st.upcoming, attended: st.attended, lastClass: st.last_class,
       })),
     };
@@ -292,6 +340,59 @@ function createApp(cfg) {
       emails.add(it.email);
     }
     return { status: 201, body: store.createStudents(items) };
+  });
+
+  // 某月壽星（預設本月）：依生日日期排序，附上當月滿幾歲
+  route('GET', /^\/api\/admin\/birthdays$/, (req, url) => {
+    requireAdmin(req);
+    const d = today();
+    const month = url.searchParams.get('month') || d.slice(0, 7); // 'YYYY-MM'
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new HttpError(400, '月份格式錯誤');
+    const mm = month.slice(5);
+    const list = store.listStudents(now())
+      .filter((st) => st.active && st.birthday && st.birthday.slice(5, 7) === mm)
+      .map((st) => {
+        const day = `${month}-${st.birthday.slice(8)}`;
+        return { id: st.id, name: st.name, birthday: st.birthday, day, age: ageOn(st.birthday, day), isToday: day === d, passed: day < d };
+      })
+      .sort((a, b) => a.day.localeCompare(b.day) || a.name.localeCompare(b.name));
+    return { month, today: d, students: list };
+  });
+
+  // ----- 堂數卡 -----
+  route('GET', /^\/api\/admin\/students\/(\d+)\/passes$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    if (!store.getStudent(Number(id))) throw new HttpError(404, '找不到這位學員');
+    return { passes: store.listPasses(Number(id)).map(publicPass) };
+  });
+
+  route('POST', /^\/api\/admin\/students\/(\d+)\/passes$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    if (!store.getStudent(Number(id))) throw new HttpError(404, '找不到這位學員');
+    return { status: 201, body: { id: store.createPass(Number(id), parsePass(body)) } };
+  });
+
+  route('PUT', /^\/api\/admin\/passes\/(\d+)$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const p = store.getPass(Number(id));
+    if (!p) throw new HttpError(404, '找不到這張堂數卡');
+    const input = parsePass(body);
+    if (input.total < p.used) throw new HttpError(409, `已經用了 ${p.used} 堂，總堂數不能少於這個數字`);
+    store.updatePass(p.id, input);
+    return { ok: true };
+  });
+
+  route('POST', /^\/api\/admin\/passes\/(\d+)\/(void|restore)$/, (req, url, body, [, id, act]) => {
+    requireAdmin(req);
+    if (!store.setPassVoided(Number(id), act === 'void')) throw new HttpError(404, '找不到這張堂數卡');
+    return { ok: true };
+  });
+
+  route('DELETE', /^\/api\/admin\/passes\/(\d+)$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    if (!store.getPass(Number(id))) throw new HttpError(404, '找不到這張堂數卡');
+    if (!store.deletePass(Number(id))) throw new HttpError(409, '這張卡已經用來約過課，無法刪除，請改用「作廢」');
+    return { ok: true };
   });
 
   route('PUT', /^\/api\/admin\/students\/(\d+)$/, (req, url, body, [, id]) => {
@@ -323,7 +424,7 @@ function createApp(cfg) {
     if (!st) throw new HttpError(404, '找不到這位學員');
     return {
       bookings: store.studentBookings(st.id, '0000').reverse().map((b) => ({
-        id: b.id, status: b.status, trial: !!b.trial, title: b.title, category: b.category, startAt: b.start_at,
+        id: b.id, status: b.status, trial: !!b.trial, passName: b.pass_name, title: b.title, category: b.category, startAt: b.start_at,
         durationMin: b.duration_min, slotCancelled: !!b.slot_cancelled, past: b.start_at <= now(),
       })),
     };
@@ -342,6 +443,8 @@ function createApp(cfg) {
         bookings: store.slotBookings(s.id).map((b) => ({
           id: b.id, studentId: b.student_id, name: b.name, email: b.email, phone: b.phone, note: b.note,
           trial: !!b.trial, bookedBy: b.booked_by, status: b.status, createdAt: b.created_at,
+          passId: b.pass_id, passName: b.pass_name,
+          birthdayToday: !!b.birthday && b.birthday.slice(5) === s.start_at.slice(5, 10),
         })),
       })),
     };
@@ -395,9 +498,10 @@ function createApp(cfg) {
     const r = store.book({
       slotId: Number(id), studentId: st.id, note: str(body.note, 200, '備註', { required: false }),
       trial: body.trial === true, bookedBy: 'admin', isOpen: (s) => !s.cancelled,
+      usePass: body.trial === true || body.usePass === 'none' ? 'none' : 'auto',
     });
     if (r.error) throw new HttpError(r.status, r.error);
-    return { status: 201, body: { id: r.booking.id } };
+    return { status: 201, body: { id: r.booking.id, pass: r.pass && publicPass(r.pass) } };
   });
 
   // 固定課表

@@ -119,6 +119,24 @@ describe('API', () => {
     assert.equal((await req(`/api/admin/students/${mei}/activate`, { method: 'POST', auth: token })).status, 200);
   });
 
+  test('堂數卡：開卡、沒有堂數不能約', async () => {
+    const tomorrowSlot = (await req('/api/slots?days=20')).data.slots.find((s) => s.title === '兒童班');
+    const huaT = (await req('/api/login', { method: 'POST', body: { email: 'hua@example.com' } })).data.token;
+    // 還沒開卡：不能約
+    const no = await req('/api/bookings', { method: 'POST', auth: huaT, body: { slotId: tomorrowSlot.id } });
+    assert.equal(no.status, 409);
+    assert.match(no.data.error, /沒有可用的堂數/);
+    assert.equal((await req(`/api/bookings/preview?slotId=${tomorrowSlot.id}`, { auth: huaT })).data.pass, null);
+
+    const d = today(), end = T.addDays(d, 29);
+    const mk = (id, body) => req(`/api/admin/students/${id}/passes`, { method: 'POST', auth: token, body });
+    assert.equal((await mk(ming, { name: '8 堂月卡', total: 8, startDate: d, endDate: end })).status, 201);
+    assert.equal((await mk(hua, { name: '兒童 1 堂', total: 1, startDate: d, endDate: end, categories: ['kids'] })).status, 201);
+    assert.equal((await mk(mei, { name: '舊卡', total: 4, startDate: T.addDays(d, -60), endDate: T.addDays(d, -1) })).status, 201);
+    assert.equal((await mk(ming, { name: 'x', total: 1, startDate: d, endDate: T.addDays(d, -1) })).status, 400);
+    assert.equal((await req(`/api/bookings/preview?slotId=${tomorrowSlot.id}`, { auth: huaT })).data.pass.name, '兒童 1 堂');
+  });
+
   test('學員預約：需要登入、名額、重複、額滿、取消', async () => {
     const slot = (await req('/api/slots?days=20')).data.slots.find((s) => s.title === '兒童班');
     assert.equal(slot.remaining, 2);
@@ -226,6 +244,104 @@ describe('API', () => {
     assert.equal(r.headers.get('location'), base.replace('http://', 'https://') + '/my?x=1');
     const ok = await fetch(base + '/', { redirect: 'manual', headers: { 'X-Forwarded-Proto': 'https' } });
     assert.equal(ok.status, 200);
+  });
+
+  test('堂數卡：扣堂、取消退回、停課退回、適用課程、過期、作廢、代約不扣堂', async () => {
+    const d = today();
+    const mkSlot = async (title, category, days) => {
+      const date = T.addDays(d, days);
+      return (await req('/api/admin/slots', { method: 'POST', auth: token, body: {
+        title, category, date, time: '20:00', duration: 60, capacity: 10 } })).data.id;
+    };
+    const st = (await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '阿卡', email: 'card@example.com' } })).data.id;
+    const t = (await req('/api/login', { method: 'POST', body: { email: 'card@example.com' } })).data.token;
+    const mk = (body) => req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: token, body });
+    const passes = async () => (await req(`/api/admin/students/${st}/passes`, { auth: token })).data.passes;
+    const book = (slotId) => req('/api/bookings', { method: 'POST', auth: t, body: { slotId } });
+
+    // 兩張卡：快到期的 2 堂（只限 tkd）、晚到期的 1 堂（全部課程）
+    const a = (await mk({ name: '短卡', total: 2, startDate: d, endDate: T.addDays(d, 5), categories: ['tkd'] })).data.id;
+    const b = (await mk({ name: '長卡', total: 1, startDate: d, endDate: T.addDays(d, 20) })).data.id;
+    const s1 = await mkSlot('A', 'tkd', 1), s2 = await mkSlot('B', 'tkd', 2), s3 = await mkSlot('C', 'kids', 3);
+    const s4 = await mkSlot('D', 'tkd', 10), s5 = await mkSlot('E', 'tkd', 25);
+
+    const r1 = await book(s1);
+    assert.equal(r1.data.pass.name, '短卡'); // 先扣最快到期的
+    assert.equal(r1.data.pass.remaining, 1);
+    assert.equal((await book(s3)).data.pass.name, '長卡'); // 短卡不適用 kids，改扣長卡
+    assert.equal((await book(s2)).data.pass.name, '短卡');
+    let ps = await passes();
+    assert.equal(ps.find((p) => p.id === a).status, 'used');
+    // 堂數用完
+    assert.match((await book(s4)).data.error, /沒有可用的堂數/);
+    // 超過有效期限的課不能用這些卡
+    assert.match((await book(s5)).data.error, /沒有可用的堂數/);
+
+    // 學員取消 → 退回堂數
+    const mine = (await req('/api/my/bookings', { auth: t })).data.bookings;
+    const bk1 = mine.find((x) => x.title === 'A');
+    assert.equal(bk1.passName, '短卡');
+    assert.equal((await req(`/api/my/bookings/${bk1.id}/cancel`, { method: 'POST', auth: t })).status, 200);
+    assert.equal((await passes()).find((p) => p.id === a).remaining, 1);
+    // 老師停課 → 退回；恢復 → 再扣
+    await req(`/api/admin/slots/${s2}/cancel`, { method: 'POST', auth: token });
+    assert.equal((await passes()).find((p) => p.id === a).remaining, 2);
+    await req(`/api/admin/slots/${s2}/restore`, { method: 'POST', auth: token });
+    assert.equal((await passes()).find((p) => p.id === a).remaining, 1);
+
+    // 總堂數不能改成少於已用；可以加堂數
+    const upd = (total) => req(`/api/admin/passes/${a}`, { method: 'PUT', auth: token, body: {
+      name: '短卡', total, startDate: d, endDate: T.addDays(d, 5), categories: ['tkd'] } });
+    assert.equal((await upd(0)).status, 400);
+    assert.equal((await req(`/api/admin/passes/${b}`, { method: 'PUT', auth: token, body: {
+      name: '長卡', total: 1, startDate: d, endDate: T.addDays(d, 20) } })).status, 200);
+
+    // 作廢後不能再用；用過的卡不能刪除
+    assert.equal((await req(`/api/admin/passes/${a}/void`, { method: 'POST', auth: token })).status, 200);
+    assert.match((await book(s4)).data.error, /沒有可用的堂數/);
+    assert.equal((await req(`/api/admin/passes/${a}`, { method: 'DELETE', auth: token })).status, 409);
+    assert.equal((await req('/api/my/passes', { auth: t })).data.passes.some((p) => p.id === a), false);
+    const unused = (await mk({ name: '開錯', total: 3, startDate: d, endDate: T.addDays(d, 5) })).data.id;
+    assert.equal((await req(`/api/admin/passes/${unused}`, { method: 'DELETE', auth: token })).status, 200);
+
+    // 老師代約：沒有堂數也可以，名單標示未扣堂
+    const add = await req(`/api/admin/slots/${s4}/bookings`, { method: 'POST', auth: token, body: { studentId: st } });
+    assert.equal(add.status, 201);
+    assert.equal(add.data.pass, null);
+    const roster = (await req(`/api/admin/slots?from=${d}&to=${T.addDays(d, 12)}`, { auth: token })).data.slots
+      .find((x) => x.id === s4).bookings;
+    assert.equal(roster[0].passName, null);
+
+    // 學員列表摘要
+    const me = (await req('/api/admin/students', { auth: token })).data.students.find((x) => x.id === st);
+    assert.equal(me.credits.remaining, 0);
+  });
+
+  test('生日與當月壽星', async () => {
+    const d = today();
+    const ym = d.slice(0, 7);
+    const born = `2015-${d.slice(5, 7)}-01`;           // 本月 1 日生
+    const other = d.slice(5, 7) === '06' ? '2010-07-15' : '2010-06-15'; // 別的月份
+    const mk = (name, email, birthday) => req('/api/admin/students', { method: 'POST', auth: token, body: { name, email, birthday } });
+    assert.equal((await mk('壽星', 'bday@example.com', born.replace(/-/g, '/'))).status, 201); // 接受 2015/11/01 寫法
+    assert.equal((await mk('別月', 'other@example.com', other)).status, 201);
+    assert.equal((await mk('錯誤', 'bad@example.com', '2015-02-30')).status, 400);
+    assert.equal((await mk('未來', 'future@example.com', '2099-01-01')).status, 400);
+
+    const r = await req('/api/admin/birthdays', { auth: token });
+    assert.equal(r.data.month, ym);
+    const hit = r.data.students.find((x) => x.name === '壽星');
+    assert.ok(hit);
+    assert.equal(hit.birthday, born);
+    assert.equal(hit.age, Number(ym.slice(0, 4)) - 2015);
+    assert.ok(!r.data.students.some((x) => x.name === '別月'));
+    const other2 = await req(`/api/admin/birthdays?month=${ym.slice(0, 4)}-${other.slice(5, 7)}`, { auth: token });
+    assert.ok(other2.data.students.some((x) => x.name === '別月'));
+    assert.equal((await req('/api/admin/birthdays')).status, 401);
+    // 停用的學員不列入
+    const id = (await req('/api/admin/students', { auth: token })).data.students.find((x) => x.name === '壽星').id;
+    await req(`/api/admin/students/${id}/deactivate`, { method: 'POST', auth: token });
+    assert.ok(!(await req('/api/admin/birthdays', { auth: token })).data.students.some((x) => x.name === '壽星'));
   });
 
   test('靜態頁面與路徑安全', async () => {

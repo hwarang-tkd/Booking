@@ -28,7 +28,8 @@
     const res = $('result');
     res.innerHTML = '<div class="empty">載入中…</div>';
     try {
-      const { student, bookings } = await sapi('/api/my/bookings');
+      const [{ student, bookings }, { passes }] = await Promise.all([sapi('/api/my/bookings'), sapi('/api/my/passes')]);
+      renderPasses(passes);
       auth.save(auth.token, student);
       $('meName').textContent = student.name;
       $('meEmail').textContent = student.email;
@@ -53,6 +54,36 @@
     }
   }
 
+  function renderPasses(passes) {
+    const box = $('passes');
+    const today = (cfg.now || '').slice(0, 10);
+    const shown = passes.filter((p) => p.status === 'active' || p.status === 'future'
+      || (p.endDate >= addDays(today, -30)));           // 過期或用完的只顯示最近 30 天內的
+    if (!shown.length) {
+      box.innerHTML = '<div class="card empty" style="padding:18px">目前沒有堂數，請聯絡老師購買課程方案。</div>';
+      return;
+    }
+    const label = { active: ['ok', '使用中'], future: ['', '尚未開始'], used: ['', '已用完'], expired: ['', '已過期'] };
+    box.innerHTML = shown.map((p) => {
+      const days = Math.round((toMs(p.endDate + 'T00:00') - toMs(today + 'T00:00')) / 86400000);
+      const live = p.status === 'active';
+      const pct = Math.round((p.used / p.total) * 100);
+      return `<div class="card${live || p.status === 'future' ? '' : ' past'}" style="padding:14px 16px">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap">
+          <b>${esc(p.name)}</b> <span class="badge ${label[p.status][0]}">${label[p.status][1]}</span>
+        </div>
+        <div style="font-size:1.5rem;font-weight:800;margin-top:4px">剩 ${p.remaining} 堂
+          <span class="muted" style="font-size:.9rem;font-weight:400">／共 ${p.total} 堂</span></div>
+        <div class="bar"><i style="width:${pct}%"></i></div>
+        <div class="${live && days <= 7 ? '' : 'muted'}" style="font-size:.88rem;margin-top:6px">
+          ${p.status === 'future' ? `${fmtDate(p.startDate)} 開始・` : ''}有效期限至 ${fmtDate(p.endDate)}
+          ${live ? (days <= 7 ? `<b style="color:var(--warn)">（還有 ${days} 天，記得用完喔）</b>` : `（還有 ${days} 天）`) : ''}
+        </div>
+        ${p.categories.length ? `<div class="muted" style="font-size:.82rem">適用：${p.categories.map(catName).join('、')}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+
   function card(b) {
     const el = document.createElement('div');
     el.className = 'card slot cat';
@@ -67,6 +98,7 @@
         <div class="title" ${cancelled ? 'style="text-decoration:line-through;opacity:.6"' : ''}>${esc(b.title)}</div>
         ${b.subtitle ? `<div class="subtitle">${esc(b.subtitle)}</div>` : ''}
         <div class="meta">${badge}${b.trial ? '<span class="badge warn">體驗課</span>' : ''}
+          ${b.passName && !cancelled && !b.slotCancelled ? `<span class="muted" style="font-size:.82rem">🎫 ${esc(b.passName)}</span>` : ''}
           ${!cancelled && !b.past && !b.slotCancelled && !b.cancellable
             ? `<span class="muted" style="font-size:.85rem">已超過線上取消期限（上課前 ${cfg.cancelHours} 小時），請直接聯絡老師</span>` : ''}
         </div>
@@ -77,7 +109,7 @@
       ev.target.disabled = true;
       try {
         await sapi(`/api/my/bookings/${b.id}/cancel`, { method: 'POST' });
-        toast('已取消預約');
+        toast(b.passName ? `已取消，退回「${b.passName}」1 堂` : '已取消預約');
         load();
       } catch (e) {
         alert(e.message);
