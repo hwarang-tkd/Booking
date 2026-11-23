@@ -519,6 +519,107 @@ describe('API', () => {
     assert.ok(my.every((p) => p.unlimited && p.remaining === null));
   });
 
+  test('場地租借：只能租空檔、各類型上限、費用、取消、後台代訂', async () => {
+    const d = T.addDays(today(), 3);
+    const cfgR = (await req('/api/rentals/config')).data;
+    assert.equal(cfgR.types.group.rate, 600); assert.equal(cfgR.types.private.cap, 3); assert.equal(cfgR.types.self.cap, 6);
+    const st = (await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '租場地', email: 'rent@example.com' } })).data.id;
+    const t = (await login('rent@example.com')).data.token;
+    // 10:00–11:00 有課
+    const cls = (await req('/api/admin/slots', { method: 'POST', auth: token, body: {
+      title: '早課', date: d, time: '10:00', duration: 60, capacity: 5 } })).data.id;
+    const av = (await req(`/api/rentals/availability?date=${d}`)).data.segments;
+    assert.equal(av.find((x) => x.time === '10:00').classBusy, true);
+    assert.equal(av.find((x) => x.time === '10:30').classBusy, true);
+    assert.equal(av.find((x) => x.time === '11:00').classBusy, false);
+
+    const rent = (body, auth = t) => req('/api/rentals', { method: 'POST', auth, body: { date: d, hours: 1, ...body } });
+    assert.equal((await rent({ type: 'group', start: '12:00' }, null)).status, 401);       // 要登入
+    assert.equal((await rent({ type: 'group', start: '10:30' })).status, 409);             // 和課程重疊
+    assert.equal((await rent({ type: 'group', start: '12:15' })).status, 400);             // 要整點或半點
+    assert.equal((await rent({ type: 'group', start: '12:00', hours: 0.5 })).status, 400); // 至少 1 小時
+    assert.equal((await rent({ type: 'group', start: '21:30' })).status, 400);             // 超過開放時間
+    const g = await rent({ type: 'group', start: '11:00', hours: 2 });
+    assert.equal(g.status, 201);
+    assert.equal(g.data.rental.price, 1200);
+    assert.equal((await rent({ type: 'private', start: '12:30' })).status, 409);           // 包場時段
+
+    // 一對一最多 3 組
+    for (let i = 0; i < 3; i++) assert.equal((await rent({ type: 'private', start: '14:00' })).status, 201);
+    const fourth = await rent({ type: 'private', start: '14:30' });
+    assert.equal(fourth.status, 409);
+    assert.match(fourth.data.error, /3 組/);
+    assert.equal((await rent({ type: 'group', start: '14:00' })).status, 409);             // 已有人租就不能包場
+    // 自主訓練最多 6 人（可以和一對一同時）
+    assert.equal((await rent({ type: 'self', start: '14:00', people: 4 })).data.rental.price, 400);
+    const over = await rent({ type: 'self', start: '14:30', people: 3 });
+    assert.equal(over.status, 409);
+    assert.match(over.data.error, /只剩 2/);
+    assert.equal((await rent({ type: 'self', start: '14:30', people: 2, hours: 1.5 })).data.rental.price, 300);
+    assert.equal((await rent({ type: 'self', start: '15:00', people: 7 })).status, 400);
+
+    // 我的租借、取消後空出名額
+    const mine = (await req('/api/my/rentals', { auth: t })).data.rentals;
+    assert.equal(mine.length, 6);
+    const p1 = mine.find((r) => r.type === 'private');
+    assert.equal((await req(`/api/my/rentals/${p1.id}/cancel`, { method: 'POST', auth: t })).status, 200);
+    assert.equal((await rent({ type: 'private', start: '14:00' })).status, 201);
+    assert.equal((await req(`/api/my/rentals/${p1.id}/cancel`, { method: 'POST', auth: mingToken })).status, 404); // 別人的
+
+    // 停課後時段空出來
+    await req(`/api/admin/slots/${cls}/cancel`, { method: 'POST', auth: token });
+    assert.equal((await rent({ type: 'self', start: '10:00' })).status, 201);
+    await req(`/api/admin/slots/${cls}/restore`, { method: 'POST', auth: token });
+
+    // 後台代訂：每週重複；其中一週衝突就全部不建立
+    const add = (body) => req('/api/admin/rentals', { method: 'POST', auth: token, body: {
+      contactName: '外部教練', contactPhone: '0911222333', type: 'group', date: d, start: '19:00', hours: 1, ...body } });
+    const r3 = await add({ repeatWeeks: 3 });
+    assert.equal(r3.status, 201, JSON.stringify(r3.data)); assert.equal(r3.data.created, 3); assert.equal(r3.data.price, 600);
+    const conflict = (await req('/api/admin/slots', { method: 'POST', auth: token, body: {
+      title: '擋', date: T.addDays(d, 7), time: '20:00', duration: 60, capacity: 5 } })).data.id;
+    assert.ok(conflict);
+    const bad = await add({ start: '20:30', hours: 1, repeatWeeks: 2 });   // 第 2 週 20:00 有課
+    assert.equal(bad.status, 409);
+    const list = (await req(`/api/admin/rentals?from=${d}&to=${T.addDays(d, 30)}`, { auth: token })).data.rentals;
+    assert.equal(list.filter((r) => r.contactName === '外部教練').length, 3); // 沒有多建
+    const one = list.find((r) => r.contactName === '外部教練');
+    assert.equal((await req(`/api/admin/rentals/${one.id}/paid`, { method: 'POST', auth: token, body: { paid: true } })).status, 200);
+    assert.equal((await req(`/api/admin/rentals/${one.id}/cancel`, { method: 'POST', auth: token })).status, 200);
+    const after = (await req(`/api/admin/rentals?from=${d}&to=${T.addDays(d, 1)}`, { auth: token })).data.rentals.find((r) => r.id === one.id);
+    assert.equal(after.paid, true); assert.equal(after.status, 'cancelled');
+    assert.equal((await req('/api/admin/rentals', { auth: t })).status, 401);
+  });
+
+  test('報表匯出：依期間、依學員，JSON 與 Excel', async () => {
+    const from = T.addDays(today(), -30), to = T.addDays(today(), 60);
+    const r = await req(`/api/admin/report?from=${from}&to=${to}`, { auth: token });
+    assert.equal(r.status, 200);
+    assert.ok(r.data.bookings.length > 0);
+    assert.ok(r.data.rentals.length > 0);
+    assert.equal(r.data.headers.bookings[0], '日期');
+    assert.ok(r.data.perStudent.length > 0);
+    const rentAmount = r.data.summary.find(([k]) => k === '場地租借金額')[1];
+    assert.ok(rentAmount > 0);
+    // 指定學員
+    const st = (await req('/api/admin/students', { auth: token })).data.students.find((x) => x.name === '租場地');
+    const one = (await req(`/api/admin/report?from=${from}&to=${to}&studentId=${st.id}`, { auth: token })).data;
+    assert.ok(one.rentals.length > 0 && one.rentals.every((x) => x[5] === '租場地'));
+    assert.ok(one.bookings.every((x) => x[4] === '租場地'));
+    // 英文
+    assert.equal((await req(`/api/admin/report?from=${from}&to=${to}&lang=en`, { auth: token })).data.headers.bookings[0], 'Date');
+    // Excel 下載
+    const res = await fetch(`${base}/api/admin/report.xlsx?from=${from}&to=${to}`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /spreadsheetml/);
+    assert.match(res.headers.get('content-disposition'), /filename\*=UTF-8''/);
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.equal(buf.slice(0, 2).toString(), 'PK');
+    // 錯誤與權限
+    assert.equal((await req(`/api/admin/report?from=${to}&to=${from}`, { auth: token })).status, 400);
+    assert.equal((await req(`/api/admin/report?from=${from}&to=${to}`)).status, 401);
+  });
+
   test('生日與當月壽星', async () => {
     const d = today();
     const ym = d.slice(0, 7);
@@ -668,6 +769,28 @@ test('沒有設定寄信時，忘記密碼請學員聯絡老師', async () => {
   const app = await start({ seedSchedule: false });
   const r = await app.req('/api/password/forgot', { method: 'POST', body: { email: 'a@example.com' } });
   assert.equal(r.data.sent, false);
+  app.server.close();
+});
+
+test('場地需在開始前 2 小時完成預約', async () => {
+  const app = await start({ seedSchedule: false, rentalOpen: '00:00', rentalClose: '24:00' });
+  const admin = (await app.req('/api/admin/login', { method: 'POST', body: { password: 'secret' } })).data.token;
+  const id = (await app.req('/api/admin/students', { method: 'POST', auth: admin, body: { name: 'A', email: 'a@example.com' } })).data.id;
+  const link = (await app.req(`/api/admin/students/${id}/reset-link`, { method: 'POST', auth: admin })).data.url;
+  const t = (await app.req('/api/password/reset', { method: 'POST', body: { token: new URL(link).searchParams.get('token'), password: 'pass1234' } })).data.token;
+  // 現在起 1 小時內的下一個半點 → 不到 2 小時，不能訂
+  const nowMs = T.toMs(T.nowLocal(TZ));
+  const soon = T.fromMs(Math.ceil((nowMs + 31 * 60000) / 1800000) * 1800000);
+  if (soon.slice(11) <= '22:30') {
+    const r = await app.req('/api/rentals', { method: 'POST', auth: t, body: { type: 'self', date: soon.slice(0, 10), start: soon.slice(11), hours: 1 } });
+    assert.equal(r.status, 409);
+    assert.match(r.data.error, /2 小時/);
+    const seg = (await app.req(`/api/rentals/availability?date=${soon.slice(0, 10)}`)).data.segments.find((x) => x.time === soon.slice(11));
+    assert.equal(seg.closed, true);
+    // 後台代訂不受限制
+    assert.equal((await app.req('/api/admin/rentals', { method: 'POST', auth: admin, body: {
+      contactName: 'B', type: 'self', date: soon.slice(0, 10), start: soon.slice(11), hours: 1 } })).status, 201);
+  }
   app.server.close();
 });
 

@@ -118,7 +118,9 @@
   // ---------- 分頁 ----------
   document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
-    for (const t of ['schedule', 'students', 'templates', 'extra']) $('tab-' + t).classList.toggle('hidden', b.dataset.tab !== t);
+    for (const t of ['schedule', 'students', 'templates', 'extra', 'rentals', 'export']) $('tab-' + t).classList.toggle('hidden', b.dataset.tab !== t);
+    if (b.dataset.tab === 'rentals') loadRentals();
+    if (b.dataset.tab === 'export') initExport();
     if (b.dataset.tab === 'schedule') loadSchedule();
     if (b.dataset.tab === 'templates') loadTemplates();
     if (b.dataset.tab === 'students') loadStudents();
@@ -779,6 +781,208 @@
             ${m}/${Number(x.day.slice(8))}・滿 ${x.age} 歲</span>`).join('')}</div>`;
       box.classList.remove('hidden');
     } catch { box.classList.add('hidden'); }
+  }
+
+  // ---------- 場地租借 ----------
+  let rc = null, rWeek = null;
+  const RTYPE = (k) => (rc ? (isEn ? rc.types[k].nameEn : rc.types[k].name) : k);
+  const tMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const tStr = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+  async function initRentForm() {
+    if (rc) return;
+    rc = await api('/api/rentals/config');
+    const f = $('rentForm');
+    f.type.innerHTML = Object.keys(rc.types).map((k) => `<option value="${k}">${esc(RTYPE(k))}（${rc.types[k].rate} 元／${rc.types[k].per === 'person-hour' ? '人・小時' : '小時'}）</option>`).join('');
+    const starts = [];
+    for (let m = tMin(rc.open); m < tMin(rc.close); m += 30) starts.push(tStr(m));
+    f.start.innerHTML = starts.map((t) => `<option>${t}</option>`).join('');
+    f.start.value = starts.includes('17:00') ? '17:00' : starts[0];
+    const hrs = [];
+    for (let h = 1; h <= rc.maxHours; h += 0.5) hrs.push(h);
+    f.hours.innerHTML = hrs.map((h) => `<option value="${h}">${h} 小時</option>`).join('');
+    f.hours.value = 2;
+    f.people.innerHTML = Array.from({ length: rc.types.self.cap }, (_, i) => `<option value="${i + 1}">${i + 1} 人</option>`).join('');
+    f.repeat.innerHTML = [1, 2, 4, 8, 12, 26, 52].map((n) => `<option value="${n}">${n === 1 ? '不重複' : `連續 ${n} 週`}</option>`).join('');
+    f.date.value = todayStr();
+    const syncType = () => $('rPeople').classList.toggle('hidden', f.type.value !== 'self');
+    f.type.addEventListener('change', syncType); syncType();
+  }
+
+  async function loadRentals() {
+    const box = $('rentalList');
+    try {
+      await initRentForm();
+      if (!students.length) await loadStudents(true);
+      $('rentWho').innerHTML = students.filter((x) => x.active).map((x) => `<option value="${esc(`${x.name} <${x.email}>`)}"></option>`).join('');
+      if (!rWeek) rWeek = mondayOf(todayStr());
+      const to = addDays(rWeek, 7);
+      $('rRange').textContent = `${fmtDate(rWeek)} – ${fmtDate(addDays(rWeek, 6))}`;
+      const { rentals } = await call(`/api/admin/rentals?from=${rWeek}&to=${to}`);
+      const live = rentals.filter((r) => r.status === 'active');
+      const total = live.reduce((n, r) => n + r.price, 0), unpaid = live.filter((r) => !r.paid).reduce((n, r) => n + r.price, 0);
+      $('rSum').textContent = `本週 ${live.length} 筆租借，共 ${total.toLocaleString()} 元，未收款 ${unpaid.toLocaleString()} 元`;
+      if (!rentals.length) { box.innerHTML = '<div class="card empty">這週沒有場地租借</div>'; return; }
+      box.innerHTML = '';
+      let last = '';
+      for (const r of rentals) {
+        if (r.date !== last) {
+          const h = document.createElement('div'); h.className = 'day-head'; h.textContent = fmtDate(r.date); box.appendChild(h); last = r.date;
+        }
+        const el = document.createElement('div');
+        const cancelled = r.status === 'cancelled';
+        el.className = 'card' + (cancelled ? ' past' : '');
+        el.style.cssText = 'margin-bottom:8px;padding:10px 14px';
+        el.innerHTML = `
+          <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+            <div style="flex:1;min-width:200px">
+              <b>${r.start}–${r.end}</b>　${esc(RTYPE(r.type))}${r.type === 'self' ? `・${r.people} 人` : ''}
+              ${cancelled ? '<span class="badge">已取消</span>' : r.paid ? '<span class="badge ok">已付款</span>' : '<span class="badge warn">未付款</span>'}
+              <div style="font-size:.9rem">${esc(r.contactName)}${r.contactPhone ? `・<a href="tel:${esc(r.contactPhone)}">${esc(r.contactPhone)}</a>` : ''}
+                ${r.bookedBy === 'admin' ? '<span class="badge">代訂</span>' : ''}</div>
+              <div class="muted" style="font-size:.85rem">${r.price.toLocaleString()} 元${r.note ? `・${esc(r.note)}` : ''}</div>
+            </div>
+            ${cancelled ? '' : `<div class="btns" style="margin:0">
+              <button class="btn secondary small" data-a="paid">${r.paid ? '改為未付款' : '標記已收款'}</button>
+              <button class="btn danger small" data-a="cancel">取消</button></div>`}
+          </div>`;
+        const a = (n, fn) => { const b = el.querySelector(`[data-a="${n}"]`); if (b) b.onclick = fn; };
+        a('paid', async () => {
+          try { await call(`/api/admin/rentals/${r.id}/paid`, { method: 'POST', body: { paid: !r.paid } }); loadRentals(); } catch (e) { fail(e); }
+        });
+        a('cancel', async () => {
+          if (!confirm(`取消 ${fmtDate(r.date)} ${r.start}–${r.end} ${r.contactName} 的場地租借？`)) return;
+          try { await call(`/api/admin/rentals/${r.id}/cancel`, { method: 'POST' }); toast('已取消場地租借'); loadRentals(); } catch (e) { fail(e); }
+        });
+        box.appendChild(el);
+      }
+    } catch (e) { if (e.status !== 401) box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
+  }
+  $('rPrev').onclick = () => { rWeek = addDays(rWeek, -7); loadRentals(); };
+  $('rNext').onclick = () => { rWeek = addDays(rWeek, 7); loadRentals(); };
+  $('rToday').onclick = () => { rWeek = null; loadRentals(); };
+
+  // 從「姓名 <信箱>」找學員
+  const findStudentByLabel = (v) => {
+    const who = v.trim().toLowerCase();
+    return students.find((x) => `${x.name} <${x.email}>`.toLowerCase() === who) || null;
+  };
+
+  $('rentForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = ev.target, msg = $('rentMsg');
+    const st = findStudentByLabel(f.who.value);
+    try {
+      const r = await call('/api/admin/rentals', { method: 'POST', body: {
+        studentId: st ? st.id : undefined, contactName: st ? undefined : f.who.value, contactPhone: f.phone.value,
+        type: f.type.value, date: f.date.value, start: f.start.value, hours: Number(f.hours.value),
+        people: Number(f.people.value), repeatWeeks: Number(f.repeat.value), note: f.note.value,
+      } });
+      msg.className = 'alert ok';
+      msg.textContent = `✅ 已代訂 ${r.created} 筆（每筆 ${r.price.toLocaleString()} 元）`;
+      rWeek = mondayOf(f.date.value);
+      loadRentals();
+    } catch (e) { if (e.status !== 401) showError(msg, e.message); }
+  });
+
+  // ---------- 報表匯出 ----------
+  let exportReady = false;
+  async function initExport() {
+    if (!students.length) await loadStudents(true);
+    $('exportWho').innerHTML = students.map((x) => `<option value="${esc(`${x.name} <${x.email}>`)}"></option>`).join('');
+    if (exportReady) return;
+    exportReady = true;
+    setRange('month');
+  }
+  function setRange(q) {
+    const f = $('exportForm'), t = todayStr(), first = `${t.slice(0, 7)}-01`;
+    const lastOf = (d) => addDays(addMonths(d, 1), 0);   // addMonths 已減一天 → 當月最後一天
+    const ranges = {
+      week: [mondayOf(t), addDays(mondayOf(t), 6)],
+      month: [first, lastOf(first)],
+      lastmonth: (() => { const p = `${addDays(first, -1).slice(0, 7)}-01`; return [p, addDays(first, -1)]; })(),
+      30: [addDays(t, -29), t],
+      next30: [t, addDays(t, 29)],
+    };
+    [f.from.value, f.to.value] = ranges[q];
+    document.querySelectorAll('#quickRange [data-q]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.q === q)));
+  }
+  document.querySelectorAll('#quickRange [data-q]').forEach((b) => b.addEventListener('click', () => setRange(b.dataset.q)));
+
+  function exportQuery() {
+    const f = $('exportForm');
+    if (!f.from.value || !f.to.value) throw new Error('請選擇開始與結束日期');
+    const q = new URLSearchParams({ from: f.from.value, to: f.to.value, lang: isEn ? 'en' : 'zh' });
+    if (f.who.value.trim()) {
+      const st = findStudentByLabel(f.who.value);
+      if (!st) throw new Error('找不到這位學員，請從清單選擇「姓名 <信箱>」');
+      q.set('studentId', st.id);
+    }
+    return q;
+  }
+
+  $('exXlsx').onclick = async () => {
+    const msg = $('exportMsg');
+    msg.classList.add('hidden');
+    try {
+      const res = await fetch('/api/admin/report.xlsx?' + exportQuery(), { headers: { Authorization: 'Bearer ' + token } });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '匯出失敗');
+      const blob = await res.blob();
+      const m = /filename\*=UTF-8''([^;]+)/.exec(res.headers.get('content-disposition') || '');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = m ? decodeURIComponent(m[1]) : 'report.xlsx';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast('已下載 Excel');
+    } catch (e) { showError(msg, e.message); }
+  };
+
+  $('exPdf').onclick = async () => {
+    const msg = $('exportMsg');
+    msg.classList.add('hidden');
+    let q;
+    try { q = exportQuery(); } catch (e) { return showError(msg, e.message); }
+    const w = window.open('', '_blank');   // 要在點擊當下開視窗，才不會被擋
+    if (!w) return showError(msg, '瀏覽器擋住了新視窗，請允許此網站開啟彈出視窗');
+    w.document.write('<p style="font-family:sans-serif">載入中…</p>');
+    try {
+      const r = await call('/api/admin/report?' + q);
+      w.document.open();
+      w.document.write(printHtml(r));
+      w.document.close();
+      setTimeout(() => w.print(), 400);
+    } catch (e) { w.close(); if (e.status !== 401) showError(msg, e.message); }
+  };
+
+  function printHtml(r) {
+    const table = (title, head, rows) => rows.length ? `<h2>${esc(title)}（${rows.length}）</h2>
+      <table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map((row) => `<tr>${row.map((v) => `<td>${esc(typeof v === 'number' ? v.toLocaleString() : v ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+      : `<h2>${esc(title)}</h2><p class="muted">${isEn ? 'None' : '沒有資料'}</p>`;
+    const name = isEn ? (cfg.schoolName || '') : (cfg.schoolNameZh || cfg.schoolName || '');
+    return `<!doctype html><html lang="${isEn ? 'en' : 'zh-Hant'}"><head><meta charset="utf-8">
+      <title>${esc(name)} ${r.from}~${r.to}</title>
+      <style>
+        @page { size: A4 landscape; margin: 12mm; }
+        body { font: 11px/1.45 system-ui, -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif; color: #111; }
+        h1 { font-size: 18px; margin: 0 0 4px; } h2 { font-size: 14px; margin: 18px 0 6px; }
+        table { border-collapse: collapse; width: 100%; page-break-inside: auto; }
+        tr { page-break-inside: avoid; } thead { display: table-header-group; }
+        th, td { border: 1px solid #bbb; padding: 3px 5px; text-align: left; vertical-align: top; }
+        th { background: #f2e6e7; } .muted { color: #777; }
+        .sum { width: auto; } .sum td:first-child { background: #faf3f3; font-weight: 600; }
+        .no-print { margin: 10px 0; } @media print { .no-print { display: none; } }
+      </style></head><body>
+      <div class="no-print"><button onclick="print()">${isEn ? 'Print / Save as PDF' : '列印／另存為 PDF'}</button></div>
+      <h1>${esc(name)}　${isEn ? 'Report' : '約課與場地租借報表'}</h1>
+      <div class="muted">${esc(r.from)} ~ ${esc(r.to)}${r.student ? `・${esc(r.student.name)}` : ''}</div>
+      <h2>${esc(r.sheets[0])}</h2>
+      <table class="sum"><tbody>${r.summary.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(typeof v === 'number' ? v.toLocaleString() : v)}</td></tr>`).join('')}</tbody></table>
+      ${table(r.sheets[1], r.headers.bookings, r.bookings)}
+      ${table(r.sheets[2], r.headers.rentals, r.rentals)}
+      ${r.student ? '' : table(r.sheets[3], r.headers.perStudent, r.perStudent)}
+      </body></html>`;
   }
 
   // ---------- 固定課表 ----------

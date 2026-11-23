@@ -5,6 +5,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { openDb, createStore, passStatus } = require('./lib/db');
 const { createMailer, resetPasswordMail } = require('./lib/mail');
+const R = require('./lib/rental');
+const { buildXlsx } = require('./lib/xlsx');
 const { CATEGORIES, CATEGORY_IDS, DEFAULT_TEMPLATES } = require('./lib/schedule');
 const T = require('./lib/time');
 
@@ -15,7 +17,7 @@ if (require.main === module && fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PAGES = {
   '/': '/index.html', '/my': '/my.html', '/info': '/info.html', '/admin': '/admin.html',
-  '/register': '/register.html', '/forgot': '/forgot.html', '/reset': '/reset.html',
+  '/register': '/register.html', '/forgot': '/forgot.html', '/reset': '/reset.html', '/rent': '/rent.html',
 };
 const CONSENT_VERSION = '2026-11';
 const MIME = {
@@ -42,6 +44,10 @@ function loadConfig(env = process.env) {
     bookCutoffMinutes: num(env.BOOK_CUTOFF_MINUTES, 0),
     bookAheadDays: num(env.BOOK_AHEAD_DAYS, 28) || 28,
     seedSchedule: env.SEED_SCHEDULE !== '0',
+    rentalOpen: env.RENTAL_OPEN || '09:00',      // 場地開放租借的時間
+    rentalClose: env.RENTAL_CLOSE || '22:00',
+    rentalMaxHours: num(env.RENTAL_MAX_HOURS, 10),
+    rentalCutoffHours: num(env.RENTAL_CUTOFF_HOURS, 2), // 場地需在開始前幾小時完成預約
     publicUrl: (env.PUBLIC_URL || '').replace(/\/+$/, ''),  // 例如 https://booking.hwarang-tkd-tw.com（寄信連結用）
     resendApiKey: env.RESEND_API_KEY || '',
     mailFrom: env.MAIL_FROM || '',                            // 例如 花郎武道館 <no-reply@hwarang-tkd-tw.com>
@@ -473,6 +479,100 @@ function createApp(cfg) {
     return { ok: true };
   });
 
+  // ---------- 場地租借 ----------
+  const publicRentalTypes = () => Object.fromEntries(Object.entries(R.RENTAL_TYPES)
+    .map(([k, t]) => [k, { name: t.name, nameEn: t.nameEn, rate: t.rate, per: t.per, cap: t.cap, exclusive: t.exclusive }]));
+
+  /** 驗證租借時段：對齊 30 分鐘、在開放時間內、至少 1 小時。 */
+  function parseRental(b) {
+    const type = b.type;
+    if (!R.RENTAL_TYPES[type]) throw new HttpError(400, '請選擇租借類型');
+    if (!T.isValidDate(b.date)) throw new HttpError(400, '日期格式錯誤');
+    if (!T.isValidTime(b.start) || R.toMin(b.start) % R.STEP) throw new HttpError(400, '開始時間需為整點或半點');
+    const hours = Number(b.hours);
+    if (!(hours >= 1 && hours <= cfg.rentalMaxHours && (hours * 60) % R.STEP === 0)) {
+      throw new HttpError(400, `租借時數需為 1～${cfg.rentalMaxHours} 小時（以半小時為單位）`);
+    }
+    const startM = R.toMin(b.start), endM = startM + hours * 60;
+    if (startM < R.toMin(cfg.rentalOpen) || endM > R.toMin(cfg.rentalClose)) {
+      throw new HttpError(400, `場地開放時間為 ${cfg.rentalOpen}–${cfg.rentalClose}`);
+    }
+    const people = type === 'self' ? int(b.people ?? 1, 1, R.RENTAL_TYPES.self.cap, '人數') : 1;
+    return { type, date: b.date, start: b.start, end: R.toTime(endM), minutes: hours * 60, people,
+      price: R.rentalPrice(type, hours * 60, people), note: str(b.note, 200, '備註', { required: false }) };
+  }
+  /** 在交易中檢查：時段內每 30 分鐘都沒有課程、而且還沒到上限。 */
+  function rentalConflict(r) {
+    const segs = R.daySegments({ open: cfg.rentalOpen, close: cfg.rentalClose, slots: store.slotsOnDay(r.date), rentals: store.rentalsOn(r.date) });
+    for (const sg of segs) {
+      if (sg.start < R.toMin(r.end) && R.toMin(r.start) < sg.end) {
+        const e = R.checkSegment(sg, r.type, r.people);
+        if (e) return `${r.date} ${sg.time}：${e}`;
+      }
+    }
+    return null;
+  }
+  const publicRental = (r) => ({
+    id: r.id, type: r.type, date: r.date, start: r.start, end: r.end, people: r.people, price: r.price, note: r.note,
+    paid: !!r.paid, status: r.status, contactName: r.contact_name, contactPhone: r.contact_phone, bookedBy: r.booked_by,
+    studentId: r.student_id, past: `${r.date}T${r.start}` <= now(),
+  });
+
+  route('GET', /^\/api\/rentals\/config$/, () => ({
+    types: publicRentalTypes(), open: cfg.rentalOpen, close: cfg.rentalClose, maxHours: cfg.rentalMaxHours,
+    bookAheadDays: cfg.bookAheadDays, cancelHours: cfg.cancelHours, cutoffHours: cfg.rentalCutoffHours, now: now(),
+  }));
+
+  route('GET', /^\/api\/rentals\/availability$/, (req, url) => {
+    const date = url.searchParams.get('date');
+    if (!T.isValidDate(date)) throw new HttpError(400, '日期格式錯誤');
+    ensureGenerated(T.addDays(today(), cfg.bookAheadDays + 1));
+    const segs = R.daySegments({ open: cfg.rentalOpen, close: cfg.rentalClose, slots: store.slotsOnDay(date), rentals: store.rentalsOn(date) });
+    const nowT = now();
+    return {
+      date,
+      // closed：已經過了或不到截止時間，不能再線上預約
+      segments: segs.map((sg) => ({ time: sg.time, closed: T.minutesBetween(nowT, `${date}T${sg.time}`) < cfg.rentalCutoffHours * 60,
+        classBusy: sg.classBusy,
+        group: sg.group, private: sg.private, self: sg.self })),
+    };
+  });
+
+  route('POST', /^\/api\/rentals$/, (req, url, body) => {
+    const me = pickMember(currentFamily(req), body.studentId);
+    const r = parseRental(body);
+    if (T.minutesBetween(now(), `${r.date}T${r.start}`) < cfg.rentalCutoffHours * 60) {
+      throw new HttpError(409, `場地需在開始前 ${cfg.rentalCutoffHours} 小時完成預約`);
+    }
+    if (r.date > T.addDays(today(), cfg.bookAheadDays)) throw new HttpError(409, `只能預約 ${cfg.bookAheadDays} 天內的場地`);
+    const out = store.bookRentals([{ ...r, studentId: me.id, contactName: me.name, contactPhone: me.phone, bookedBy: 'student' }],
+      rentalConflict);
+    if (out.error) throw new HttpError(409, out.error);
+    return { status: 201, body: { rental: publicRental(store.getRental(out.ids[0])) } };
+  });
+
+  route('GET', /^\/api\/my\/rentals$/, (req) => {
+    const family = currentFamily(req);
+    const list = store.rentalsByStudent(family.map((x) => x.id), T.addDays(today(), -14))
+      .sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`));
+    return {
+      rentals: list.map((r) => ({ ...publicRental(r),
+        cancellable: r.status === 'active' && T.minutesBetween(now(), `${r.date}T${r.start}`) >= cfg.cancelHours * 60 })),
+    };
+  });
+
+  route('POST', /^\/api\/my\/rentals\/(\d+)\/cancel$/, (req, url, body, [, id]) => {
+    const family = currentFamily(req);
+    const r = store.getRental(Number(id));
+    if (!r || !family.some((x) => x.id === r.student_id)) throw new HttpError(404, '找不到這筆租借');
+    if (r.status !== 'active') throw new HttpError(409, '這筆租借已經取消了');
+    if (T.minutesBetween(now(), `${r.date}T${r.start}`) < cfg.cancelHours * 60) {
+      throw new HttpError(409, `開始前 ${cfg.cancelHours} 小時內無法線上取消，請直接聯絡老師`);
+    }
+    store.cancelRental(r.id);
+    return { ok: true };
+  });
+
   // ---------- 老師後台 API ----------
   route('POST', /^\/api\/admin\/login$/, (req, url, body) => {
     checkThrottle(req);
@@ -488,6 +588,168 @@ function createApp(cfg) {
     const t = bearer(req);
     if (t) store.deleteSession(t);
     return { ok: true };
+  });
+
+  // ----- 場地租借（後台） -----
+  route('GET', /^\/api\/admin\/rentals$/, (req, url) => {
+    requireAdmin(req);
+    const from = url.searchParams.get('from') || today();
+    const to = url.searchParams.get('to') || T.addDays(from, 7);
+    if (!T.isValidDate(from) || !T.isValidDate(to)) throw new HttpError(400, '日期格式錯誤');
+    return { rentals: store.rentalsBetween(from, to).map((r) => ({ ...publicRental(r), studentName: r.student_name, studentEmail: r.student_email })) };
+  });
+
+  // 老師代訂（可每週重複，例如固定租借時段）；不受「已經過了」的限制，方便補登
+  route('POST', /^\/api\/admin\/rentals$/, (req, url, body) => {
+    requireAdmin(req);
+    const r = parseRental(body);
+    let student = null;
+    if (body.studentId) {
+      student = store.getStudent(Number(body.studentId));
+      if (!student) throw new HttpError(404, '找不到這位學員');
+    }
+    const contactName = student ? student.name : str(body.contactName, 60, '租借人姓名');
+    const contactPhone = student ? student.phone : normPhone(body.contactPhone);
+    const weeks = int(body.repeatWeeks ?? 1, 1, 52, '重複週數');
+    const items = [];
+    for (let i = 0; i < weeks; i++) {
+      items.push({ ...r, date: T.addDays(r.date, i * 7), studentId: student ? student.id : null, contactName, contactPhone, bookedBy: 'admin' });
+    }
+    const out = store.bookRentals(items, rentalConflict);
+    if (out.error) throw new HttpError(409, out.error);
+    return { status: 201, body: { created: out.ids.length, price: r.price } };
+  });
+
+  route('POST', /^\/api\/admin\/rentals\/(\d+)\/cancel$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    if (!store.getRental(Number(id))) throw new HttpError(404, '找不到這筆租借');
+    if (!store.cancelRental(Number(id))) throw new HttpError(409, '這筆租借已經取消了');
+    return { ok: true };
+  });
+
+  route('POST', /^\/api\/admin\/rentals\/(\d+)\/paid$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    if (!store.setRentalPaid(Number(id), body.paid === true)) throw new HttpError(404, '找不到這筆租借');
+    return { ok: true };
+  });
+
+  // ----- 報表匯出（約課、場地租借） -----
+  const L = {
+    zh: {
+      dow: ['日', '一', '二', '三', '四', '五', '六'], all: '全部學員',
+      booking: ['日期', '星期', '時間', '課程', '學員', '信箱', '電話', '狀態', '使用堂數卡', '體驗課', '預約方式', '備註'],
+      rental: ['日期', '星期', '時間', '時數', '類型', '租借人', '電話', '人數', '金額', '付款', '狀態', '預約方式', '備註'],
+      perStudent: ['學員', '信箱', '已上課', '已預約（未上）', '學員取消', '停課', '未扣堂', '場地租借筆數', '場地租借金額'],
+      st: { attended: '已上課', booked: '已預約', cancelled: '學員取消', slotCancelled: '停課', rentCancelled: '已取消', used: '已使用' },
+      yes: '是', paid: '已付款', unpaid: '未付款', unlimited: '（無限堂）', noPass: '未扣堂', byAdmin: '老師代約', bySelf: '學員自己',
+      byAdminRent: '老師代訂',
+      sheets: ['摘要', '約課', '場地租借', '學員統計'],
+      sum: ['期間', '學員', '約課（不含取消）', '已上課', '已預約（未上）', '學員取消', '停課', '未扣堂（可能需收費）',
+        '場地租借（不含取消）', '場地租借金額', '已收款', '未收款'],
+    },
+    en: {
+      dow: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], all: 'All students',
+      booking: ['Date', 'Day', 'Time', 'Class', 'Student', 'Email', 'Phone', 'Status', 'Credit card', 'Trial', 'Booked by', 'Note'],
+      rental: ['Date', 'Day', 'Time', 'Hours', 'Type', 'Renter', 'Phone', 'People', 'Amount', 'Payment', 'Status', 'Booked by', 'Note'],
+      perStudent: ['Student', 'Email', 'Attended', 'Upcoming', 'Cancelled', 'Class cancelled', 'No credit', 'Rentals', 'Rental amount'],
+      st: { attended: 'Attended', booked: 'Booked', cancelled: 'Cancelled', slotCancelled: 'Class cancelled', rentCancelled: 'Cancelled', used: 'Used' },
+      yes: 'Yes', paid: 'Paid', unpaid: 'Unpaid', unlimited: ' (unlimited)', noPass: 'No credit', byAdmin: 'Instructor', bySelf: 'Student',
+      byAdminRent: 'Instructor',
+      sheets: ['Summary', 'Bookings', 'Rentals', 'By student'],
+      sum: ['Period', 'Student', 'Bookings (excl. cancelled)', 'Attended', 'Upcoming', 'Cancelled by student', 'Class cancelled',
+        'No credit used (may need payment)', 'Rentals (excl. cancelled)', 'Rental amount', 'Paid', 'Unpaid'],
+    },
+  };
+
+  /** 依期間（含結束日）與學員整理報表資料。 */
+  function buildReport(url) {
+    const from = url.searchParams.get('from'), to = url.searchParams.get('to');
+    if (!T.isValidDate(from) || !T.isValidDate(to)) throw new HttpError(400, '請選擇正確的開始與結束日期');
+    if (to < from) throw new HttpError(400, '結束日期不能早於開始日期');
+    if (T.minutesBetween(`${from}T00:00`, `${to}T00:00`) > 400 * 1440) throw new HttpError(400, '一次最多匯出 400 天');
+    const lang = url.searchParams.get('lang') === 'en' ? 'en' : 'zh', t = L[lang];
+    const sid = url.searchParams.get('studentId') ? Number(url.searchParams.get('studentId')) : null;
+    const student = sid ? store.getStudent(sid) : null;
+    if (sid && !student) throw new HttpError(404, '找不到這位學員');
+    const end = T.addDays(to, 1), nowT = now();
+    const dowOf = (d) => t.dow[T.weekday(d)];
+    const typeName = (k) => (lang === 'en' ? R.RENTAL_TYPES[k].nameEn : R.RENTAL_TYPES[k].name);
+
+    const bookings = store.reportBookings(from, end, sid).map((b) => {
+      const status = b.status === 'cancelled' ? 'cancelled' : b.slot_cancelled ? 'slotCancelled'
+        : b.start_at <= nowT ? 'attended' : 'booked';
+      const endT = T.fromMs(T.toMs(b.start_at) + b.duration_min * 60000).slice(11);
+      return {
+        studentId: b.student_id, status, noPass: status !== 'cancelled' && status !== 'slotCancelled' && !b.pass_name && !b.trial,
+        row: [b.start_at.slice(0, 10), dowOf(b.start_at.slice(0, 10)), `${b.start_at.slice(11)}–${endT}`,
+          (lang === 'en' && b.title_en) || b.title, b.name, b.email, b.phone, t.st[status],
+          b.pass_name ? b.pass_name + (b.pass_unlimited ? t.unlimited : '') : (b.trial || status === 'cancelled' || status === 'slotCancelled' ? '' : t.noPass),
+          b.trial ? t.yes : '', b.booked_by === 'admin' ? t.byAdmin : t.bySelf, b.note],
+      };
+    });
+    const rentals = store.reportRentals(from, end, sid).map((r) => {
+      const status = r.status === 'cancelled' ? 'rentCancelled' : `${r.date}T${r.start}` <= nowT ? 'used' : 'booked';
+      return {
+        studentId: r.student_id, status, price: r.price, paid: !!r.paid,
+        row: [r.date, dowOf(r.date), `${r.start}–${r.end}`, (R.toMin(r.end) - R.toMin(r.start)) / 60, typeName(r.type),
+          r.contact_name, r.contact_phone, r.people, r.price, r.paid ? t.paid : t.unpaid, t.st[status],
+          r.booked_by === 'admin' ? t.byAdminRent : t.bySelf, r.note],
+        email: r.student_email || '',
+      };
+    });
+    const live = bookings.filter((b) => b.status !== 'cancelled' && b.status !== 'slotCancelled');
+    const liveR = rentals.filter((r) => r.status !== 'rentCancelled');
+    const count = (arr, st) => arr.filter((x) => x.status === st).length;
+    const sumR = (arr) => arr.reduce((n, r) => n + r.price, 0);
+    const summary = [
+      [t.sum[0], `${from} ~ ${to}`],
+      [t.sum[1], student ? `${student.name} <${student.email}>` : t.all],
+      [t.sum[2], live.length], [t.sum[3], count(bookings, 'attended')], [t.sum[4], count(bookings, 'booked')],
+      [t.sum[5], count(bookings, 'cancelled')], [t.sum[6], count(bookings, 'slotCancelled')],
+      [t.sum[7], bookings.filter((b) => b.noPass).length],
+      [t.sum[8], liveR.length], [t.sum[9], sumR(liveR)], [t.sum[10], sumR(liveR.filter((r) => r.paid))],
+      [t.sum[11], sumR(liveR.filter((r) => !r.paid))],
+    ];
+    // 學員統計（沒有指定學員時）
+    const per = new Map();
+    for (const b of bookings) {
+      const k = b.studentId;
+      const o = per.get(k) || per.set(k, { name: b.row[4], email: b.row[5], attended: 0, booked: 0, cancelled: 0, slotCancelled: 0, noPass: 0, rentals: 0, amount: 0 }).get(k);
+      o[b.status] += 1;
+      if (b.noPass) o.noPass += 1;
+    }
+    for (const r of liveR) {
+      if (!r.studentId) continue;
+      const o = per.get(r.studentId) || per.set(r.studentId, { name: r.row[5], email: r.email, attended: 0, booked: 0, cancelled: 0, slotCancelled: 0, noPass: 0, rentals: 0, amount: 0 }).get(r.studentId);
+      o.rentals += 1; o.amount += r.price;
+    }
+    const perStudent = [...per.values()].sort((a, b) => a.name.localeCompare(b.name))
+      .map((o) => [o.name, o.email, o.attended, o.booked, o.cancelled, o.slotCancelled, o.noPass, o.rentals, o.amount]);
+    return { lang, t, from, to, student, summary, bookings: bookings.map((b) => b.row), rentals: rentals.map((r) => r.row), perStudent };
+  }
+
+  route('GET', /^\/api\/admin\/report$/, (req, url) => {
+    requireAdmin(req);
+    const r = buildReport(url);
+    return {
+      from: r.from, to: r.to, student: r.student && publicStudent(r.student), summary: r.summary,
+      headers: { bookings: r.t.booking, rentals: r.t.rental, perStudent: r.t.perStudent }, sheets: r.t.sheets,
+      bookings: r.bookings, rentals: r.rentals, perStudent: r.perStudent,
+    };
+  });
+
+  route('GET', /^\/api\/admin\/report\.xlsx$/, (req, url) => {
+    requireAdmin(req);
+    const r = buildReport(url);
+    const sheets = [
+      { name: r.t.sheets[0], rows: [[r.lang === 'en' ? 'Item' : '項目', r.lang === 'en' ? 'Value' : '數值'], ...r.summary], widths: [30, 36] },
+      { name: r.t.sheets[1], rows: [r.t.booking, ...r.bookings], widths: [12, 6, 13, 22, 12, 26, 13, 10, 18, 8, 10, 24] },
+      { name: r.t.sheets[2], rows: [r.t.rental, ...r.rentals], widths: [12, 6, 13, 7, 12, 14, 13, 7, 9, 9, 9, 10, 24] },
+    ];
+    if (!r.student) sheets.push({ name: r.t.sheets[3], rows: [r.t.perStudent, ...r.perStudent], widths: [14, 26, 9, 12, 10, 10, 9, 12, 12] });
+    const who = r.student ? `_${r.student.name}` : '';
+    return { file: buildXlsx(sheets), filename: `${cfg.schoolName}_${r.from}_${r.to}${who}.xlsx`,
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
   });
 
   // ----- 寄信設定（忘記密碼用） -----
@@ -869,6 +1131,13 @@ function createApp(cfg) {
         const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
         if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, '資料格式錯誤');
         const out = await r.handler(req, url, body, m);
+        if (out && out.file) {
+          res.writeHead(200, {
+            'Content-Type': out.type, 'Cache-Control': 'no-store',
+            'Content-Disposition': `attachment; filename="report.xlsx"; filename*=UTF-8''${encodeURIComponent(out.filename)}`,
+          });
+          return res.end(out.file);
+        }
         if (out && out.status) return send(res, out.status, out.body);
         return send(res, 200, out);
       }

@@ -34,6 +34,7 @@
       $('meName').textContent = students.map((x) => x.name).join('、');
       $('meEmail').textContent = students[0].email + (many ? `（${students.length} 位學員共用）` : '');
       renderPasses(passes);
+      loadRentals();
       const upcoming = bookings.filter((b) => !b.past && b.status === 'active');
       const past = bookings.filter((b) => b.past && b.status === 'active' && !b.slotCancelled);
       const cancelled = bookings.filter((b) => !b.past && b.status === 'cancelled');
@@ -126,6 +127,42 @@
       }
     });
     return el;
+  }
+
+  // ---------- 場地租借 ----------
+  const RENT_NAME = { group: '團體課程', private: '一對一', self: '自主訓練' };
+  async function loadRentals() {
+    const box = $('rentals');
+    try {
+      const { rentals } = await sapi('/api/my/rentals');
+      const list = rentals.filter((r) => r.status === 'active' || !r.past);
+      if (!list.length) {
+        box.innerHTML = '<div class="card empty" style="padding:18px">沒有場地租借<br><a class="btn ghost" href="/rent">租借場地 →</a></div>';
+        return;
+      }
+      box.innerHTML = '';
+      for (const r of list) {
+        const el = document.createElement('div');
+        el.className = 'card slot';
+        const cancelled = r.status === 'cancelled';
+        el.innerHTML = `
+          <div class="time"><b>${r.start}</b><small>${fmtDate(r.date)}</small></div>
+          <div class="info">
+            <div class="title" ${cancelled ? 'style="text-decoration:line-through;opacity:.6"' : ''}>${esc(RENT_NAME[r.type])}${r.type === 'self' ? `・${r.people} 人` : ''}</div>
+            <div class="note">${r.start}–${r.end}・${r.price.toLocaleString()} 元${r.note ? `・${esc(r.note)}` : ''}</div>
+            <div class="meta">${cancelled ? '<span class="badge">已取消</span>' : r.past ? '<span class="badge">已使用</span>' : '<span class="badge ok">已預約</span>'}
+              ${!cancelled ? (r.paid ? '<span class="badge ok">已付款</span>' : '<span class="badge warn">尚未付款</span>') : ''}</div>
+          </div>
+          ${r.cancellable ? '<div class="actions"><button class="btn danger small">取消</button></div>' : ''}`;
+        el.querySelector('button')?.addEventListener('click', async (ev) => {
+          if (!confirm(`確定取消 ${fmtDate(r.date)} ${r.start}–${r.end} 的${RENT_NAME[r.type]}？`)) return;
+          ev.target.disabled = true;
+          try { await sapi(`/api/my/rentals/${r.id}/cancel`, { method: 'POST' }); toast('已取消場地租借'); loadRentals(); }
+          catch (e) { alert(e.message); ev.target.disabled = false; }
+        });
+        box.appendChild(el);
+      }
+    } catch (e) { if (e.status !== 401) box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
   }
 
   $('pwForm').addEventListener('submit', async (ev) => {

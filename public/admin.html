@@ -41,6 +41,8 @@
         <button role="tab" aria-selected="false" data-tab="students">學員資料</button>
         <button role="tab" aria-selected="false" data-tab="templates">固定課表</button>
         <button role="tab" aria-selected="false" data-tab="extra">加開課程</button>
+        <button role="tab" aria-selected="false" data-tab="rentals">場地租借</button>
+        <button role="tab" aria-selected="false" data-tab="export">報表匯出</button>
       </div>
 
       <!-- 課表與名單 -->
@@ -108,6 +110,69 @@
           <div data-fields></div>
           <div id="tplMsg" class="hidden"></div>
           <button class="btn block" type="submit">新增到固定課表</button>
+        </form>
+      </div>
+
+      <!-- 場地租借 -->
+      <div id="tab-rentals" class="hidden">
+        <div class="toolbar">
+          <button class="btn secondary small" id="rPrev">‹ 上週</button>
+          <button class="btn secondary small" id="rToday">本週</button>
+          <button class="btn secondary small" id="rNext">下週 ›</button>
+          <span class="range" id="rRange"></span>
+        </div>
+        <p class="muted" id="rSum" style="margin:0 0 6px;font-size:.9rem"></p>
+        <div id="rentalList"></div>
+        <h2>代訂場地</h2>
+        <form id="rentForm" class="card stack">
+          <div class="row">
+            <label class="field">租借人 <span class="hint">（學員從清單選；外部人士直接打姓名）</span>
+              <input type="text" name="who" list="rentWho" required autocomplete="off"></label>
+            <label class="field">電話 <span class="hint">（外部人士）</span><input type="tel" name="phone" inputmode="tel"></label>
+          </div>
+          <datalist id="rentWho"></datalist>
+          <div class="row">
+            <label class="field">類型 <select name="type"></select></label>
+            <label class="field">日期 <input type="date" name="date" required></label>
+          </div>
+          <div class="row">
+            <label class="field">開始時間 <select name="start"></select></label>
+            <label class="field">時數 <select name="hours"></select></label>
+          </div>
+          <div class="row">
+            <label class="field" id="rPeople">人數 <select name="people"></select></label>
+            <label class="field">每週重複 <span class="hint">（固定租借時段用）</span>
+              <select name="repeat"></select></label>
+          </div>
+          <label class="field">備註 <span class="hint">（選填）</span><input type="text" name="note" maxlength="200"></label>
+          <div id="rentMsg" class="hidden"></div>
+          <button class="btn block" type="submit">代訂</button>
+        </form>
+      </div>
+
+      <!-- 報表匯出 -->
+      <div id="tab-export" class="hidden">
+        <p class="sub">匯出約課與場地租借紀錄。Excel 檔包含摘要、約課明細、場地租借明細和學員統計；PDF 請按「列印／存成 PDF」，在列印視窗選「另存為 PDF」。</p>
+        <form id="exportForm" class="card stack">
+          <div class="filters" id="quickRange" style="flex-wrap:wrap;overflow:visible;padding:0">
+            <button type="button" data-q="week">本週</button>
+            <button type="button" data-q="month">本月</button>
+            <button type="button" data-q="lastmonth">上個月</button>
+            <button type="button" data-q="30">最近 30 天</button>
+            <button type="button" data-q="next30">未來 30 天</button>
+          </div>
+          <div class="row">
+            <label class="field">開始日期 <input type="date" name="from" required></label>
+            <label class="field">結束日期 <span class="hint">（含當天）</span><input type="date" name="to" required></label>
+          </div>
+          <label class="field">學員 <span class="hint">（選填，不填 = 全部學員）</span>
+            <input type="text" name="who" list="exportWho" autocomplete="off" placeholder="輸入姓名或信箱，從清單選擇"></label>
+          <datalist id="exportWho"></datalist>
+          <div id="exportMsg" class="hidden"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" type="button" id="exXlsx">下載 Excel</button>
+            <button class="btn secondary" type="button" id="exPdf">列印／存成 PDF</button>
+          </div>
         </form>
       </div>
 

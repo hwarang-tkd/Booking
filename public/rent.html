@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>場地租借</title>
+  <link rel="icon" href="/logo.png" type="image/png">
+  <meta name="theme-color" content="#d4959a">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/"><img src="/logo.png" alt=""><span data-school>花郎武道館</span></a>
+      <nav class="nav" data-student>
+        <a href="/">預約課程</a>
+        <a href="/rent" aria-current="page">場地租借</a>
+        <a href="/info">課表與收費</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>場地租借</h1>
+    <p class="sub" id="intro">只能租沒有課程的時段。</p>
+
+    <h2 style="margin-top:0">1. 租借類型</h2>
+    <div class="rent-types" id="types" role="radiogroup"></div>
+
+    <h2>2. 日期與時間</h2>
+    <div class="datestrip" id="dates" role="group" aria-label="選擇日期"></div>
+    <div class="card" style="padding:10px 12px">
+      <div class="timeline" id="timeline" aria-live="polite"><div class="empty">載入中…</div></div>
+    </div>
+
+    <h2>3. 確認</h2>
+    <form id="form" class="card stack">
+      <div class="row">
+        <label class="field">開始時間 <select name="start" required></select></label>
+        <label class="field">時數 <select name="hours" required></select></label>
+      </div>
+      <div class="row" id="peopleRow">
+        <label class="field">人數 <select name="people"></select></label>
+        <div></div>
+      </div>
+      <label class="field hidden" id="whoRow">租借人 <select name="studentId"></select></label>
+      <label class="field">備註 <span class="hint">（選填）</span><input type="text" name="note" maxlength="200" placeholder="例如：教練姓名、用途"></label>
+      <div class="summary" id="summary"></div>
+      <div id="msg" class="hidden"></div>
+      <button class="btn block" type="submit" id="submit">確認租借</button>
+      <p class="muted" style="font-size:.88rem;margin:0" id="rules"></p>
+    </form>
+  </main>
+
+  <footer class="site"></footer>
+  <script src="/i18n.js"></script>
+  <script src="/common.js"></script>
+  <script src="/rent.js"></script>
+</body>
+</html>
