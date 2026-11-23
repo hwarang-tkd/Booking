@@ -194,6 +194,7 @@ function createApp(cfg) {
     id: p.id, name: p.name, total: p.total, used: p.used, remaining: Math.max(0, p.total - p.used),
     purchaseDate: p.purchase_date, startDate: p.start_date, endDate: p.end_date, categories: p.categories ? p.categories.split(',') : [],
     note: p.note, status: passStatus(p, today()),
+    bookedUsed: p.booked_used, adjust: p.adjust,   // 已用 = 系統預約扣的 + 手動調整
   });
   function parsePass(b) {
     if (!T.isValidDate(b.startDate) || !T.isValidDate(b.endDate)) throw new HttpError(400, '請填寫正確的開始與到期日期');
@@ -589,13 +590,18 @@ function createApp(cfg) {
   route('GET', /^\/api\/admin\/students\/(\d+)\/passes$/, (req, url, body, [, id]) => {
     requireAdmin(req);
     if (!store.getStudent(Number(id))) throw new HttpError(404, '找不到這位學員');
-    return { passes: store.listPasses(Number(id)).map(publicPass) };
+    return { passes: store.listPasses(Number(id)).map((p) => ({ ...publicPass(p), logs: store.passLogs(p.id) })) };
   });
 
   route('POST', /^\/api\/admin\/students\/(\d+)\/passes$/, (req, url, body, [, id]) => {
     requireAdmin(req);
     if (!store.getStudent(Number(id))) throw new HttpError(404, '找不到這位學員');
-    return { status: 201, body: { id: store.createPass(Number(id), parsePass(body)) } };
+    const input = parsePass(body);
+    // 開卡時可以先填已用堂數（例如補登紙本紀錄）
+    const used = body.used === undefined || body.used === '' ? 0 : int(body.used, 0, input.total, '已使用堂數');
+    const pid = store.createPass(Number(id), { ...input, adjust: used });
+    store.logPass(pid, 'create', { name: input.name, total: input.total, end: input.endDate, used, purchase: input.purchaseDate });
+    return { status: 201, body: { id: pid } };
   });
 
   route('PUT', /^\/api\/admin\/passes\/(\d+)$/, (req, url, body, [, id]) => {
@@ -603,14 +609,51 @@ function createApp(cfg) {
     const p = store.getPass(Number(id));
     if (!p) throw new HttpError(404, '找不到這張堂數卡');
     const input = parsePass(body);
-    if (input.total < p.used) throw new HttpError(409, `已經用了 ${p.used} 堂，總堂數不能少於這個數字`);
-    store.updatePass(p.id, input);
+    // 「已使用堂數」可直接修改：和系統預約扣的堂數之間的差額記成手動調整
+    const used = body.used === undefined || body.used === '' ? p.used : int(body.used, 0, 500, '已使用堂數');
+    if (input.total < used) throw new HttpError(409, `已經用了 ${used} 堂，總堂數不能少於這個數字`);
+    store.updatePass(p.id, { ...input, adjust: used - p.booked_used });
+    // 記下改了哪些欄位（更改方案、展延、補登等）
+    const before = { name: p.name, total: p.total, start: p.start_date, end: p.end_date, purchase: p.purchase_date,
+      categories: p.categories, used: p.used };
+    const afterV = { name: input.name, total: input.total, start: input.startDate, end: input.endDate,
+      purchase: input.purchaseDate, categories: input.categories, used };
+    const changes = Object.keys(before).filter((k) => String(before[k]) !== String(afterV[k]))
+      .map((k) => [k, before[k], afterV[k]]);
+    if (changes.length) store.logPass(p.id, 'edit', { changes });
     return { ok: true };
+  });
+
+  // 展延：只改到期日
+  route('POST', /^\/api\/admin\/passes\/(\d+)\/extend$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const p = store.getPass(Number(id));
+    if (!p) throw new HttpError(404, '找不到這張堂數卡');
+    if (!T.isValidDate(body.endDate)) throw new HttpError(400, '日期格式錯誤');
+    if (body.endDate < p.start_date) throw new HttpError(400, '到期日不能早於開始日');
+    store.setPassEnd(p.id, body.endDate);
+    store.logPass(p.id, 'extend', { from: p.end_date, to: body.endDate, reason: str(body.reason, 100, '原因', { required: false }) });
+    return { ok: true, pass: publicPass(store.getPass(p.id)) };
+  });
+
+  // 快速扣 1 堂／補回 1 堂（例如學員沒預約直接來上課）
+  route('POST', /^\/api\/admin\/passes\/(\d+)\/adjust$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const p = store.getPass(Number(id));
+    if (!p) throw new HttpError(404, '找不到這張堂數卡');
+    const delta = int(body.delta, -100, 100, '調整堂數');
+    const used = p.used + delta;
+    if (used > p.total) throw new HttpError(409, '堂數已經用完了，無法再扣');
+    if (used < 0) throw new HttpError(409, '已使用堂數不能小於 0');
+    store.setPassAdjust(p.id, p.adjust + delta);
+    store.logPass(p.id, 'adjust', { delta, used });
+    return { ok: true, pass: publicPass(store.getPass(p.id)) };
   });
 
   route('POST', /^\/api\/admin\/passes\/(\d+)\/(void|restore)$/, (req, url, body, [, id, act]) => {
     requireAdmin(req);
     if (!store.setPassVoided(Number(id), act === 'void')) throw new HttpError(404, '找不到這張堂數卡');
+    store.logPass(Number(id), act);
     return { ok: true };
   });
 

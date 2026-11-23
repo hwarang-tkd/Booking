@@ -195,6 +195,16 @@ const EN = {
     'Email isn\'t set up. Students who forget their password are asked to contact you — use "Password link" on their card. Setup steps: DEPLOY.md, section 5.',
   '尚未設定 RESEND_API_KEY 和 MAIL_FROM': 'RESEND_API_KEY and MAIL_FROM are not set',
 
+  // 手動調整堂數
+  '已使用堂數': 'Credits used', '新卡通常是 0；補登紙本紀錄時可填已上過的堂數': 'Usually 0 for a new card; enter classes already taken when migrating paper records',
+  '扣 1 堂': 'Use 1', '補回 1 堂': 'Return 1', '例如學員沒預約直接來上課': 'e.g. the student came to class without booking',
+  '堂數已經用完了，無法再扣': 'No credits left to use', '已使用堂數不能小於 0': 'Credits used can\'t be below 0',
+
+  // 展延／換方案
+  '展延': 'Extend', '修改／換方案': 'Edit / change plan', '新的到期日': 'New expiry date',
+  '原因': 'Reason', '（選填，例如受傷請假、出國）': '(optional, e.g. injury, travel)',
+  '+1 週': '+1 week', '+2 週': '+2 weeks', '+1 個月': '+1 month', '+3 個月': '+3 months',
+
   // 伺服器訊息
   '找不到這堂課': 'Class not found', '這堂課已停課': 'This class has been cancelled',
   '這堂課已經開始或已截止預約': 'This class has started or booking has closed', '這堂課已額滿': 'This class is full',
@@ -325,6 +335,15 @@ const PATTERNS = [
 
   ['已寄出，請到 {} 收信（也看一下垃圾郵件匣）。', (e) => `Sent — check ${e} (and the spam folder).`],
   ['寄信失敗：{}', (m) => `Sending failed: ${m}`],
+
+  ['系統預約扣 {} 堂・手動調整 {} 堂', (b, m) => `${b} by bookings · ${m} adjusted manually`],
+  ['已補回 1 堂，剩 {} 堂', (n) => `1 credit returned — ${n} left`], ['已扣 1 堂，剩 {} 堂', (n) => `1 credit used — ${n} left`],
+  ['系統預約自動扣了 {} 堂；直接改這個數字可以修正（補登、現場上課未預約、扣錯補回）',
+    (n) => `${n} used by bookings. Edit this number to correct it (paper records, walk-ins, mistakes).`],
+
+  ['異動紀錄（{}）', (n) => `History (${n})`], ['修改「{}」（可點上方方案直接更換）', (n) => `Edit "${n}" (click a preset above to change plan)`],
+  ['目前到期日：{}', (d) => `Current expiry: ${d}`], ['已展延到 {}', (d) => `Extended to ${d}`],
+  ['{}（{}）', (a, b) => (/^\+\d/.test(a) ? `${tr(a)} (${b})` : null)],
 
   // 後台：固定課表
   ['{}・名額 {}', (s, n) => `${s} · capacity ${n}`], ['名額 {}', (n) => `Capacity ${n}`],

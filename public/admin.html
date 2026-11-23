@@ -252,7 +252,8 @@
         </div>
         <div class="row">
           <label class="field">購買日 <input type="date" name="purchaseDate" required></label>
-          <div></div>
+          <label class="field">已使用堂數 <input type="number" name="used" min="0" max="500" value="0">
+            <span class="hint" id="usedHint" style="display:block;font-weight:400;margin-top:4px">新卡通常是 0；補登紙本紀錄時可填已上過的堂數</span></label>
         </div>
         <div class="row">
           <label class="field">開始日 <input type="date" name="startDate" required></label>
@@ -271,6 +272,24 @@
       </form>
     </div>
     <div class="dlg-foot"><button type="button" class="btn secondary" data-close>關閉</button></div>
+  </dialog>
+
+  <!-- 展延堂數卡 -->
+  <dialog id="extDlg">
+    <form id="extForm" method="dialog">
+      <div class="dlg-head"><h3>展延</h3></div>
+      <div class="dlg-body stack">
+        <div class="summary" id="extSummary"></div>
+        <div class="filters" id="extQuick" style="flex-wrap:wrap;overflow:visible;padding:0"></div>
+        <label class="field">新的到期日 <input type="date" name="endDate" required></label>
+        <label class="field">原因 <span class="hint">（選填，例如受傷請假、出國）</span><input type="text" name="reason" maxlength="100"></label>
+        <div id="extErr" class="hidden"></div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="btn secondary" data-close>取消</button>
+        <button type="submit" class="btn">展延</button>
+      </div>
+    </form>
   </dialog>
 
   <!-- 設定密碼連結 -->

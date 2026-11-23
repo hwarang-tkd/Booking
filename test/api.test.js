@@ -412,6 +412,66 @@ describe('API', () => {
     assert.equal(solo.data.student.name, '妹妹');
   });
 
+  test('堂數卡：補登、手動扣／補回、修改已用堂數、展延、換方案、異動紀錄', async () => {
+    const d = today();
+    const st = (await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '補登生', email: 'back@example.com' } })).data.id;
+    const list = async () => (await req(`/api/admin/students/${st}/passes`, { auth: token })).data.passes;
+    // 補登：上個月買的 8 堂卡，紙本記錄已上 3 堂
+    const mk = await req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: token, body: {
+      name: '8 堂月卡', total: 8, purchaseDate: T.addDays(d, -20), startDate: T.addDays(d, -20), endDate: T.addDays(d, 9), used: 3 } });
+    assert.equal(mk.status, 201);
+    const id = mk.data.id;
+    let p = (await list())[0];
+    assert.equal(p.used, 3); assert.equal(p.remaining, 5); assert.equal(p.bookedUsed, 0); assert.equal(p.adjust, 3);
+    assert.equal((await req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: token, body: {
+      name: 'x', total: 2, startDate: d, endDate: d, used: 5 } })).status, 400); // 已用不能超過總堂數
+
+    // 現場上課沒預約：扣 1 堂；扣錯補回
+    const adj = (delta) => req(`/api/admin/passes/${id}/adjust`, { method: 'POST', auth: token, body: { delta } });
+    assert.equal((await adj(1)).data.pass.remaining, 4);
+    assert.equal((await adj(-1)).data.pass.remaining, 5);
+    // 系統預約也照常扣
+    const slot = (await req('/api/admin/slots', { method: 'POST', auth: token, body: {
+      title: '補登課', date: T.addDays(d, 1), time: '09:00', duration: 60, capacity: 5 } })).data.id;
+    await req(`/api/admin/slots/${slot}/bookings`, { method: 'POST', auth: token, body: { studentId: st } });
+    p = (await list())[0];
+    assert.equal(p.used, 4); assert.equal(p.bookedUsed, 1);
+
+    // 直接改已用堂數 → 自動換算手動調整
+    const put = (body) => req(`/api/admin/passes/${id}`, { method: 'PUT', auth: token, body: {
+      name: '8 堂月卡', total: 8, purchaseDate: T.addDays(d, -20), startDate: T.addDays(d, -20), endDate: T.addDays(d, 9), ...body } });
+    assert.equal((await put({ used: 6 })).status, 200);
+    p = (await list())[0];
+    assert.equal(p.used, 6); assert.equal(p.adjust, 5); assert.equal(p.remaining, 2);
+    assert.equal((await put({ used: 9 })).status, 409); // 超過總堂數
+
+    // 換方案：8 堂 → 12 堂，已用保留
+    assert.equal((await put({ name: '12 堂月卡', total: 12 })).status, 200);
+    p = (await list())[0];
+    assert.equal(p.name, '12 堂月卡'); assert.equal(p.used, 6); assert.equal(p.remaining, 6);
+
+    // 展延
+    const ext = await req(`/api/admin/passes/${id}/extend`, { method: 'POST', auth: token, body: { endDate: T.addDays(d, 40), reason: '受傷請假' } });
+    assert.equal(ext.status, 200);
+    assert.equal(ext.data.pass.endDate, T.addDays(d, 40));
+    assert.equal((await req(`/api/admin/passes/${id}/extend`, { method: 'POST', auth: token, body: { endDate: T.addDays(d, -30) } })).status, 400);
+
+    // 不能扣超過、不能補到負數
+    assert.equal((await put({ name: '12 堂月卡', total: 12, endDate: T.addDays(d, 40), used: 12 })).status, 200);
+    assert.equal((await adj(1)).status, 409);
+
+    // 異動紀錄
+    p = (await list())[0];
+    const actions = p.logs.map((l) => l.action).reverse();
+    assert.deepEqual(actions, ['create', 'adjust', 'adjust', 'edit', 'edit', 'extend', 'edit']);
+    assert.deepEqual(p.logs.find((l) => l.action === 'extend').detail.reason, '受傷請假');
+    assert.ok(p.logs.some((l) => l.action === 'edit' && l.detail.changes.some(([k, a, b]) => k === 'total' && a === 8 && b === 12)));
+    // 有手動調整紀錄的卡不能刪除
+    const fresh = (await req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: token, body: {
+      name: '空卡', total: 1, startDate: d, endDate: d, used: 1 } })).data.id;
+    assert.equal((await req(`/api/admin/passes/${fresh}`, { method: 'DELETE', auth: token })).status, 409);
+  });
+
   test('生日與當月壽星', async () => {
     const d = today();
     const ym = d.slice(0, 7);

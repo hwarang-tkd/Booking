@@ -557,12 +557,15 @@
   $('presets').querySelectorAll('[data-preset]').forEach((b) => b.onclick = () => {
     const p = PRESETS[b.dataset.preset], f = $('passForm');
     f.name.value = p.name; f.total.value = p.total;
-    if (!f.startDate.value) f.startDate.value = todayStr();
-    f.endDate.value = addMonths(f.startDate.value, p.months);
+    // 換方案（修改既有的卡）時保留原本的日期，例如已經展延過的到期日；新開卡才自動算到期日
+    if (!editingPass) {
+      if (!f.startDate.value) f.startDate.value = todayStr();
+      f.endDate.value = addMonths(f.startDate.value, p.months);
+    }
     setCats(p.cats);
   });
   const setCats = (cats) => $('passCats').querySelectorAll('input').forEach((i) => { i.checked = cats.includes(i.value); });
-  const catsText = (cats) => cats.length ? cats.map(catName).join('、') : '全部課程';
+  const catsText = (cats) => (cats.length ? cats.map(catName).join(isEn ? ', ' : '、') : '全部課程');
 
   async function openPasses(x) {
     passStudent = x;
@@ -579,6 +582,8 @@
     f.purchaseDate.max = todayStr();
     f.endDate.value = addMonths(todayStr(), 1);
     setCats(GROUP);
+    f.used.value = 0;
+    $('usedHint').textContent = '新卡通常是 0；補登紙本紀錄時可填已上過的堂數';
     $('passFormTitle').textContent = '新增堂數卡';
     $('passSave').textContent = '新增';
     $('passCancelEdit').classList.add('hidden');
@@ -603,12 +608,19 @@
             <div style="flex:1;min-width:180px">
               <b>${esc(p.name)}</b> <span class="badge ${cls}">${label}</span>
               <div style="font-size:1.05rem;margin-top:2px"><b>剩 ${p.remaining}</b> <span class="muted">/ 共 ${p.total} 堂（已用 ${p.used}）</span></div>
+              ${p.adjust ? `<div class="muted" style="font-size:.82rem">系統預約扣 ${p.bookedUsed} 堂・手動調整 ${p.adjust > 0 ? '+' : ''}${p.adjust} 堂</div>` : ''}
               <div class="muted" style="font-size:.85rem">購買日 ${fmtDate(p.purchaseDate)}・有效 ${fmtDate(p.startDate)} – ${fmtDate(p.endDate)}</div>
               <div class="muted" style="font-size:.85rem">${esc(catsText(p.categories))}</div>
               ${p.note ? `<div style="font-size:.85rem">📝 ${esc(p.note)}</div>` : ''}
+              ${p.logs && p.logs.length ? `<details style="margin-top:4px;font-size:.82rem"><summary class="muted" style="cursor:pointer">異動紀錄（${p.logs.length}）</summary>
+                <ul style="margin:4px 0 0;padding-left:1.2em">${p.logs.map((l) => `<li><span class="muted">${logTime(l.at)}</span> ${esc(logText(l))}</li>`).join('')}</ul></details>` : ''}
             </div>
             <div class="btns" style="margin:0">
-              <button class="btn secondary small" data-a="edit">編輯</button>
+              ${p.status === 'void' ? '' : `
+                <button class="btn secondary small" data-a="minus" ${p.remaining <= 0 ? 'disabled' : ''} title="例如學員沒預約直接來上課">扣 1 堂</button>
+                <button class="btn secondary small" data-a="plus" ${p.used <= 0 ? 'disabled' : ''}>補回 1 堂</button>`}
+              ${p.status === 'void' ? '' : '<button class="btn secondary small" data-a="extend">展延</button>'}
+              <button class="btn secondary small" data-a="edit">修改／換方案</button>
               ${p.status === 'void' ? '<button class="btn secondary small" data-a="restore">恢復</button>'
                 : '<button class="btn danger small" data-a="void">作廢</button>'}
               ${p.used === 0 ? '<button class="btn danger small" data-a="del">刪除</button>' : ''}
@@ -620,14 +632,26 @@
           const f = $('passForm');
           f.name.value = p.name; f.total.value = p.total; f.startDate.value = p.startDate; f.endDate.value = p.endDate;
           f.purchaseDate.value = p.purchaseDate || p.startDate;
+          f.used.value = p.used;
+          $('usedHint').textContent = `系統預約自動扣了 ${p.bookedUsed} 堂；直接改這個數字可以修正（補登、現場上課未預約、扣錯補回）`;
           f.note.value = p.note; setCats(p.categories);
-          $('passFormTitle').textContent = `編輯「${p.name}」`;
+          $('passFormTitle').textContent = `修改「${p.name}」（可點上方方案直接更換）`;
           $('passSave').textContent = '儲存';
           $('passCancelEdit').classList.remove('hidden');
           $('passErr').classList.add('hidden');
           f.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
         const after = () => { loadPasses(); loadStudents(); };
+        const adjust = async (delta) => {
+          try {
+            const r = await call(`/api/admin/passes/${p.id}/adjust`, { method: 'POST', body: { delta } });
+            toast(delta < 0 ? `已補回 1 堂，剩 ${r.pass.remaining} 堂` : `已扣 1 堂，剩 ${r.pass.remaining} 堂`);
+            after();
+          } catch (e) { fail(e); }
+        };
+        a('extend', () => openExtend(p));
+        a('minus', () => adjust(1));
+        a('plus', () => adjust(-1));
         a('void', async () => {
           if (!confirm(`作廢「${p.name}」？作廢後剩下的 ${p.remaining} 堂不能再用（已約的課不受影響）。`)) return;
           try { await call(`/api/admin/passes/${p.id}/void`, { method: 'POST' }); toast('已作廢'); after(); } catch (e) { fail(e); }
@@ -644,12 +668,69 @@
     } catch (e) { if (e.status !== 401) box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
   }
 
+  // ---------- 異動紀錄文字 ----------
+  const FIELD = isEn
+    ? { name: 'plan', total: 'credits', start: 'start', end: 'expiry', purchase: 'purchased', categories: 'classes', used: 'used' }
+    : { name: '方案名稱', total: '堂數', start: '開始日', end: '到期日', purchase: '購買日', categories: '適用課程', used: '已用堂數' };
+  const fmtVal = (k, v) => (['start', 'end', 'purchase'].includes(k) && v ? fmtDate(v)
+    : k === 'categories' ? catsText(v ? String(v).split(',') : []) : String(v));
+  const logTime = (at) => {
+    const ms = toMs(at.replace(' ', 'T').slice(0, 16)) + 8 * 3600e3; // 資料庫存 UTC，顯示台北時間
+    const d = new Date(ms).toISOString();
+    return `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} ${d.slice(11, 16)}`;
+  };
+  function logText(l) {
+    const x = l.detail || {};
+    switch (l.action) {
+      case 'create': return isEn
+        ? `Created: ${x.name}, ${x.total} credits, expires ${fmtDate(x.end)}${x.used ? `, ${x.used} already used (backfilled)` : ''}`
+        : `開卡：${x.name} ${x.total} 堂，${fmtDate(x.end)} 到期${x.used ? `，補登已用 ${x.used} 堂` : ''}`;
+      case 'edit': return (isEn ? 'Changed: ' : '修改：') + x.changes.map(([k, a, b]) => `${FIELD[k] || k} ${fmtVal(k, a)} → ${fmtVal(k, b)}`).join(isEn ? '; ' : '、');
+      case 'extend': return (isEn ? `Extended: ${fmtDate(x.from)} → ${fmtDate(x.to)}` : `展延：${fmtDate(x.from)} → ${fmtDate(x.to)}`)
+        + (x.reason ? `（${x.reason}）` : '');
+      case 'adjust': return x.delta > 0
+        ? (isEn ? `Used 1 manually (now ${x.used} used)` : `手動扣 1 堂（已用 ${x.used}）`)
+        : (isEn ? `Returned 1 manually (now ${x.used} used)` : `手動補回 1 堂（已用 ${x.used}）`);
+      case 'void': return isEn ? 'Voided' : '作廢';
+      case 'restore': return isEn ? 'Restored' : '恢復';
+      default: return l.action;
+    }
+  }
+
+  // ---------- 展延 ----------
+  let extending = null;
+  function openExtend(p) {
+    extending = p;
+    const f = $('extForm');
+    f.reset();
+    f.endDate.value = p.endDate;
+    f.endDate.min = p.startDate;
+    $('extErr').classList.add('hidden');
+    $('extSummary').innerHTML = `<b>${esc(p.name)}</b>　剩 ${p.remaining} 堂<br>目前到期日：${fmtDate(p.endDate)}`;
+    const base = p.endDate < todayStr() ? todayStr() : p.endDate; // 已過期的卡從今天起算
+    const opts = [['+1 週', addDays(base, 7)], ['+2 週', addDays(base, 14)],
+      ['+1 個月', addMonths(addDays(base, 1), 1)], ['+3 個月', addMonths(addDays(base, 1), 3)]];
+    $('extQuick').innerHTML = opts.map(([l, d]) => `<button type="button" data-d="${d}">${l}（${fmtDate(d)}）</button>`).join('');
+    $('extQuick').querySelectorAll('[data-d]').forEach((b) => b.onclick = () => { f.endDate.value = b.dataset.d; });
+    $('extDlg').showModal();
+  }
+  $('extForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    try {
+      await call(`/api/admin/passes/${extending.id}/extend`, { method: 'POST', body: { endDate: f.endDate.value, reason: f.reason.value } });
+      $('extDlg').close();
+      toast(`已展延到 ${fmtDate(f.endDate.value)}`);
+      loadPasses(); loadStudents();
+    } catch (e) { showError($('extErr'), e.message); }
+  });
+
   $('passForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const f = ev.target;
     const body = {
       name: f.name.value, total: Number(f.total.value), purchaseDate: f.purchaseDate.value,
-      startDate: f.startDate.value, endDate: f.endDate.value, note: f.note.value,
+      startDate: f.startDate.value, endDate: f.endDate.value, note: f.note.value, used: Number(f.used.value || 0),
       categories: [...$('passCats').querySelectorAll('input:checked')].map((i) => i.value),
     };
     try {
