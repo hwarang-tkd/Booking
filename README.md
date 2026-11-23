@@ -26,6 +26,7 @@ lib/schedule.js`），名額預設團體班 20 人、
 
 - **場地租借**（`/rent`）：團體課程 600 元／小時（包場）、一對一 200 元／小時（同時段最多 3 組）、自主訓練每人 100 元／小時（同時段最多 6 人）；
   只能租沒有課程的時段，需在開始前 2 小時預約；「我的預約」可查看與取消
+  租借需要老師開的「場地租借時數」卡（以小時計，自主訓練按人數 × 小時扣），時數不夠不能租；取消自動退回
 
 **老師後台**（`/admin`）
 - 密碼登入（連續輸錯 5 次鎖 5 分鐘）
@@ -82,6 +83,7 @@ npm start
 | `PUBLIC_URL` | （自動偵測） | 網站網址，例如 `https://booking.hwarang-tkd-tw.com`（寄信中的連結用） |
 | `RESEND_API_KEY` | （無） | [Resend](https://resend.com) 的 API key，設定後「忘記密碼」才會寄信 |
 | `MAIL_FROM` | （無） | 寄件者，例如 `花郎武道館 <no-reply@hwarang-tkd-tw.com>`（網域需先在 Resend 驗證） |
+| `REQUIRE_RENTAL_PASS` | `1` | 設為 `0` 則學員沒有場地租借時數也能租（改為現場付費） |
 | `RENTAL_OPEN` / `RENTAL_CLOSE` | `09:00` / `22:00` | 場地開放租借的時間 |
 | `RENTAL_CUTOFF_HOURS` | `2` | 場地需在開始前幾小時完成預約 |
 | `RENTAL_MAX_HOURS` | `10` | 單次租借最多幾小時 |

@@ -47,6 +47,7 @@ function loadConfig(env = process.env) {
     rentalOpen: env.RENTAL_OPEN || '09:00',      // 場地開放租借的時間
     rentalClose: env.RENTAL_CLOSE || '22:00',
     rentalMaxHours: num(env.RENTAL_MAX_HOURS, 10),
+    requireRentalPass: env.REQUIRE_RENTAL_PASS !== '0', // 學員自己租場地時需要場地租借時數
     rentalCutoffHours: num(env.RENTAL_CUTOFF_HOURS, 2), // 場地需在開始前幾小時完成預約
     publicUrl: (env.PUBLIC_URL || '').replace(/\/+$/, ''),  // 例如 https://booking.hwarang-tkd-tw.com（寄信連結用）
     resendApiKey: env.RESEND_API_KEY || '',
@@ -202,6 +203,7 @@ function createApp(cfg) {
     purchaseDate: p.purchase_date, startDate: p.start_date, endDate: p.end_date, categories: p.categories ? p.categories.split(',') : [],
     note: p.note, status: passStatus(p, today()),
     bookedUsed: p.booked_used, adjust: p.adjust,   // 已用 = 系統預約扣的 + 手動調整
+    kind: p.kind || 'class',                       // class 上課堂數 / rental 場地租借時數（小時）
   });
   function parsePass(b) {
     if (!T.isValidDate(b.startDate) || !T.isValidDate(b.endDate)) throw new HttpError(400, '請填寫正確的開始與到期日期');
@@ -209,17 +211,29 @@ function createApp(cfg) {
     const purchaseDate = b.purchaseDate || today();
     if (!T.isValidDate(purchaseDate)) throw new HttpError(400, '購買日格式錯誤');
     if (purchaseDate > today()) throw new HttpError(400, '購買日不能晚於今天');
-    const cats = Array.isArray(b.categories) ? b.categories.filter((c) => CATEGORY_IDS.includes(c)) : [];
+    // 卡種：class 上課堂數（適用課程分類）、rental 場地租借時數（適用租借類型，以小時計、可到半小時）
+    const kind = b.kind === 'rental' ? 'rental' : 'class';
+    const allowed = kind === 'rental' ? Object.keys(R.RENTAL_TYPES) : CATEGORY_IDS;
+    const cats = Array.isArray(b.categories) ? b.categories.filter((c) => allowed.includes(c)) : [];
     const unlimited = b.unlimited === true;
     return {
       name: str(b.name, 40, '方案名稱'),
+      kind,
       unlimited,
-      total: unlimited ? 0 : int(b.total, 1, 500, '堂數'),   // 無限堂不設堂數
+      total: unlimited ? 0 : kind === 'rental' ? halfHours(b.total, 0.5, 1000, '時數') : int(b.total, 1, 500, '堂數'),
       startDate: b.startDate, endDate: b.endDate,
       categories: [...new Set(cats)].join(','),
       note: str(b.note, 200, '備註', { required: false }),
       purchaseDate,
     };
+  }
+  /** 以半小時為單位的數字（場地時數）。 */
+  function halfHours(v, min, max, field) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < min || n > max || Math.round(n * 2) !== n * 2) {
+      throw new HttpError(400, `${field}需為 ${min}–${max}，以 0.5 為單位`);
+    }
+    return n;
   }
   const publicStudent = (st) => ({ id: st.id, name: st.name, email: st.email, phone: st.phone });
   const GENDERS = ['M', 'F', 'X'];
@@ -498,7 +512,8 @@ function createApp(cfg) {
       throw new HttpError(400, `場地開放時間為 ${cfg.rentalOpen}–${cfg.rentalClose}`);
     }
     const people = type === 'self' ? int(b.people ?? 1, 1, R.RENTAL_TYPES.self.cap, '人數') : 1;
-    return { type, date: b.date, start: b.start, end: R.toTime(endM), minutes: hours * 60, people,
+    // 扣的時數：自主訓練按人數 × 小時，其他按小時
+    return { type, date: b.date, start: b.start, end: R.toTime(endM), minutes: hours * 60, people, units: hours * people,
       price: R.rentalPrice(type, hours * 60, people), note: str(b.note, 200, '備註', { required: false }) };
   }
   /** 在交易中檢查：時段內每 30 分鐘都沒有課程、而且還沒到上限。 */
@@ -516,12 +531,22 @@ function createApp(cfg) {
     id: r.id, type: r.type, date: r.date, start: r.start, end: r.end, people: r.people, price: r.price, note: r.note,
     paid: !!r.paid, status: r.status, contactName: r.contact_name, contactPhone: r.contact_phone, bookedBy: r.booked_by,
     studentId: r.student_id, past: `${r.date}T${r.start}` <= now(),
+    passName: r.pass_name || null, units: r.units,
   });
 
   route('GET', /^\/api\/rentals\/config$/, () => ({
     types: publicRentalTypes(), open: cfg.rentalOpen, close: cfg.rentalClose, maxHours: cfg.rentalMaxHours,
     bookAheadDays: cfg.bookAheadDays, cancelHours: cfg.cancelHours, cutoffHours: cfg.rentalCutoffHours, now: now(),
+    requirePass: cfg.requireRentalPass,
   }));
+
+  // 預覽：這筆租借會扣哪張場租卡
+  route('GET', /^\/api\/rentals\/preview$/, (req, url) => {
+    const me = pickMember(currentFamily(req), url.searchParams.get('studentId'));
+    const r = parseRental(Object.fromEntries(url.searchParams));
+    const pass = store.previewRentalPass(me.id, r);
+    return { pass: pass && publicPass(pass), units: r.units, required: cfg.requireRentalPass };
+  });
 
   route('GET', /^\/api\/rentals\/availability$/, (req, url) => {
     const date = url.searchParams.get('date');
@@ -546,9 +571,11 @@ function createApp(cfg) {
     }
     if (r.date > T.addDays(today(), cfg.bookAheadDays)) throw new HttpError(409, `只能預約 ${cfg.bookAheadDays} 天內的場地`);
     const out = store.bookRentals([{ ...r, studentId: me.id, contactName: me.name, contactPhone: me.phone, bookedBy: 'student' }],
-      rentalConflict);
-    if (out.error) throw new HttpError(409, out.error);
-    return { status: 201, body: { rental: publicRental(store.getRental(out.ids[0])) } };
+      rentalConflict, cfg.requireRentalPass ? 'require' : 'auto');
+    if (out.error) throw new HttpError(409, out.error, out.code);
+    return { status: 201, body: {
+      rental: publicRental(store.getRental(out.ids[0])), pass: out.passes[0] && publicPass(out.passes[0]),
+    } };
   });
 
   route('GET', /^\/api\/my\/rentals$/, (req) => {
@@ -615,9 +642,12 @@ function createApp(cfg) {
     for (let i = 0; i < weeks; i++) {
       items.push({ ...r, date: T.addDays(r.date, i * 7), studentId: student ? student.id : null, contactName, contactPhone, bookedBy: 'admin' });
     }
-    const out = store.bookRentals(items, rentalConflict);
+    // 代訂給學員時，有場租時數就自動扣；勾「不扣時數」或外部人士則不扣
+    const out = store.bookRentals(items, rentalConflict, body.usePass === 'none' ? 'none' : 'auto');
     if (out.error) throw new HttpError(409, out.error);
-    return { status: 201, body: { created: out.ids.length, price: r.price } };
+    const used = out.passes.filter(Boolean);
+    return { status: 201, body: { created: out.ids.length, price: r.price, deducted: used.length,
+      pass: used.length ? publicPass(store.getPass(used[used.length - 1].id)) : null } };
   });
 
   route('POST', /^\/api\/admin\/rentals\/(\d+)\/cancel$/, (req, url, body, [, id]) => {
@@ -638,7 +668,7 @@ function createApp(cfg) {
     zh: {
       dow: ['日', '一', '二', '三', '四', '五', '六'], all: '全部學員',
       booking: ['日期', '星期', '時間', '課程', '學員', '信箱', '電話', '狀態', '使用堂數卡', '體驗課', '預約方式', '備註'],
-      rental: ['日期', '星期', '時間', '時數', '類型', '租借人', '電話', '人數', '金額', '付款', '狀態', '預約方式', '備註'],
+      rental: ['日期', '星期', '時間', '時數', '類型', '租借人', '電話', '人數', '金額', '付款', '使用時數卡', '扣除時數', '狀態', '預約方式', '備註'],
       perStudent: ['學員', '信箱', '已上課', '已預約（未上）', '學員取消', '停課', '未扣堂', '場地租借筆數', '場地租借金額'],
       st: { attended: '已上課', booked: '已預約', cancelled: '學員取消', slotCancelled: '停課', rentCancelled: '已取消', used: '已使用' },
       yes: '是', paid: '已付款', unpaid: '未付款', unlimited: '（無限堂）', noPass: '未扣堂', byAdmin: '老師代約', bySelf: '學員自己',
@@ -650,7 +680,7 @@ function createApp(cfg) {
     en: {
       dow: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], all: 'All students',
       booking: ['Date', 'Day', 'Time', 'Class', 'Student', 'Email', 'Phone', 'Status', 'Credit card', 'Trial', 'Booked by', 'Note'],
-      rental: ['Date', 'Day', 'Time', 'Hours', 'Type', 'Renter', 'Phone', 'People', 'Amount', 'Payment', 'Status', 'Booked by', 'Note'],
+      rental: ['Date', 'Day', 'Time', 'Hours', 'Type', 'Renter', 'Phone', 'People', 'Amount', 'Payment', 'Hours card', 'Hours used', 'Status', 'Booked by', 'Note'],
       perStudent: ['Student', 'Email', 'Attended', 'Upcoming', 'Cancelled', 'Class cancelled', 'No credit', 'Rentals', 'Rental amount'],
       st: { attended: 'Attended', booked: 'Booked', cancelled: 'Cancelled', slotCancelled: 'Class cancelled', rentCancelled: 'Cancelled', used: 'Used' },
       yes: 'Yes', paid: 'Paid', unpaid: 'Unpaid', unlimited: ' (unlimited)', noPass: 'No credit', byAdmin: 'Instructor', bySelf: 'Student',
@@ -690,9 +720,10 @@ function createApp(cfg) {
     const rentals = store.reportRentals(from, end, sid).map((r) => {
       const status = r.status === 'cancelled' ? 'rentCancelled' : `${r.date}T${r.start}` <= nowT ? 'used' : 'booked';
       return {
-        studentId: r.student_id, status, price: r.price, paid: !!r.paid,
+        studentId: r.student_id, status, price: r.pass_name ? 0 : r.price, paid: !!r.paid,   // 扣時數的不算現金
         row: [r.date, dowOf(r.date), `${r.start}–${r.end}`, (R.toMin(r.end) - R.toMin(r.start)) / 60, typeName(r.type),
-          r.contact_name, r.contact_phone, r.people, r.price, r.paid ? t.paid : t.unpaid, t.st[status],
+          r.contact_name, r.contact_phone, r.people, r.price, r.pass_name ? '' : (r.paid ? t.paid : t.unpaid),
+          r.pass_name || '', r.pass_name ? r.units : '', t.st[status],
           r.booked_by === 'admin' ? t.byAdminRent : t.bySelf, r.note],
         email: r.student_email || '',
       };
@@ -744,7 +775,7 @@ function createApp(cfg) {
     const sheets = [
       { name: r.t.sheets[0], rows: [[r.lang === 'en' ? 'Item' : '項目', r.lang === 'en' ? 'Value' : '數值'], ...r.summary], widths: [30, 36] },
       { name: r.t.sheets[1], rows: [r.t.booking, ...r.bookings], widths: [12, 6, 13, 22, 12, 26, 13, 10, 18, 8, 10, 24] },
-      { name: r.t.sheets[2], rows: [r.t.rental, ...r.rentals], widths: [12, 6, 13, 7, 12, 14, 13, 7, 9, 9, 9, 10, 24] },
+      { name: r.t.sheets[2], rows: [r.t.rental, ...r.rentals], widths: [12, 6, 13, 7, 12, 14, 13, 7, 9, 9, 18, 9, 9, 10, 24] },
     ];
     if (!r.student) sheets.push({ name: r.t.sheets[3], rows: [r.t.perStudent, ...r.perStudent], widths: [14, 26, 9, 12, 10, 10, 9, 12, 12] });
     const who = r.student ? `_${r.student.name}` : '';
@@ -797,7 +828,8 @@ function createApp(cfg) {
     const summary = store.passSummary(today());
     return {
       students: store.listStudents(now()).map((st) => ({
-        credits: summary[st.id] || { remaining: 0, nextExpiry: null, future: 0 },
+        credits: summary[st.id] || { remaining: 0, nextExpiry: null, future: 0, unlimited: false, unlimitedUntil: null,
+          rental: { remaining: 0, nextExpiry: null, future: 0, unlimited: false, unlimitedUntil: null } },
         ...publicStudent(st), note: st.note, birthday: st.birthday, active: !!st.active, createdAt: st.created_at, lastLogin: st.last_login,
         gender: st.gender, healthNotes: st.health_notes, consentPrivacyAt: st.consent_privacy_at, consentPhoto: st.consent_photo,
         source: st.source, hasPassword: !!store.getAccount(st.email),
@@ -864,9 +896,10 @@ function createApp(cfg) {
     const input = parsePass(body);
     // 開卡時可以先填已用堂數（例如補登紙本紀錄）
     const used = body.used === undefined || body.used === '' ? 0
-      : int(body.used, 0, input.unlimited ? 9999 : input.total, '已使用堂數');
+      : input.kind === 'rental' ? halfHours(body.used, 0, input.unlimited ? 9999 : input.total, '已使用時數')
+        : int(body.used, 0, input.unlimited ? 9999 : input.total, '已使用堂數');
     const pid = store.createPass(Number(id), { ...input, adjust: used });
-    store.logPass(pid, 'create', { name: input.name, total: input.total, unlimited: input.unlimited, end: input.endDate, used,
+    store.logPass(pid, 'create', { name: input.name, kind: input.kind, total: input.total, unlimited: input.unlimited, end: input.endDate, used,
       purchase: input.purchaseDate });
     return { status: 201, body: { id: pid } };
   });
@@ -875,9 +908,10 @@ function createApp(cfg) {
     requireAdmin(req);
     const p = store.getPass(Number(id));
     if (!p) throw new HttpError(404, '找不到這張堂數卡');
-    const input = parsePass(body);
+    const input = parsePass({ ...body, kind: p.kind });   // 卡種開卡後不能改
     // 「已使用堂數」可直接修改：和系統預約扣的堂數之間的差額記成手動調整
-    const used = body.used === undefined || body.used === '' ? p.used : int(body.used, 0, 500, '已使用堂數');
+    const used = body.used === undefined || body.used === '' ? p.used
+      : input.kind === 'rental' ? halfHours(body.used, 0, 9999, '已使用時數') : int(body.used, 0, 500, '已使用堂數');
     if (!input.unlimited && input.total < used) throw new HttpError(409, `已經用了 ${used} 堂，總堂數不能少於這個數字`);
     store.updatePass(p.id, { ...input, adjust: used - p.booked_used });
     // 記下改了哪些欄位（更改方案、展延、補登等）
@@ -908,7 +942,10 @@ function createApp(cfg) {
     requireAdmin(req);
     const p = store.getPass(Number(id));
     if (!p) throw new HttpError(404, '找不到這張堂數卡');
-    const delta = int(body.delta, -100, 100, '調整堂數');
+    const delta = p.kind === 'rental' ? Number(body.delta) : int(body.delta, -100, 100, '調整堂數');
+    if (p.kind === 'rental' && !(Number.isFinite(delta) && Math.abs(delta) <= 100 && Math.round(delta * 2) === delta * 2 && delta)) {
+      throw new HttpError(400, '調整時數需以 0.5 為單位');
+    }
     const used = p.used + delta;
     if (!p.unlimited && used > p.total) throw new HttpError(409, '堂數已經用完了，無法再扣');
     if (used < 0) throw new HttpError(409, '已使用堂數不能小於 0');
@@ -952,7 +989,7 @@ function createApp(cfg) {
     requireAdmin(req);
     const r = store.deleteStudent(Number(id));
     if (r === null) throw new HttpError(404, '找不到這位學員');
-    if (r === false) throw new HttpError(409, '這位學員有預約紀錄，無法刪除，請改用「停用」');
+    if (r === false) throw new HttpError(409, '這位學員有預約、堂數或租借紀錄，無法刪除，請改用「停用」');
     return { ok: true };
   });
 

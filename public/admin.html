@@ -145,6 +145,7 @@
               <select name="repeat"></select></label>
           </div>
           <label class="field">備註 <span class="hint">（選填）</span><input type="text" name="note" maxlength="200"></label>
+          <label class="check"><input type="checkbox" name="nopass"><span>不扣場租時數（學員有時數時預設會自動扣）</span></label>
           <div id="rentMsg" class="hidden"></div>
           <button class="btn block" type="submit">代訂</button>
         </form>
@@ -308,19 +309,26 @@
       <form id="passForm" class="card stack" style="box-shadow:none;background:var(--surface-2)">
         <b id="passFormTitle">新增堂數卡</b>
         <div>
+          <span class="muted" style="font-size:.85rem">卡種：</span>
+          <div class="filters" id="passKind" style="padding-bottom:0">
+            <button type="button" data-k="class" aria-pressed="true">上課堂數</button>
+            <button type="button" data-k="rental" aria-pressed="false">場地租借時數</button>
+          </div>
+        </div>
+        <div>
           <span class="muted" style="font-size:.85rem">快速套用收費方案：</span>
           <div class="filters" id="presets" style="flex-wrap:wrap;overflow:visible;padding-bottom:0"></div>
         </div>
         <div class="row">
           <label class="field">方案名稱 <input type="text" name="name" maxlength="40" required placeholder="例如：8 堂月卡"></label>
           <div>
-            <label class="field">堂數 <input type="number" name="total" min="1" max="500" required value="8"></label>
-            <label class="check" style="margin-top:6px;font-size:.9rem"><input type="checkbox" name="unlimited"><span><b>無限堂</b>（有效期間內不限堂數）</span></label>
+            <label class="field"><span id="totalLabel">堂數</span> <input type="number" name="total" min="1" max="500" required value="8"></label>
+            <label class="check" style="margin-top:6px;font-size:.9rem"><input type="checkbox" name="unlimited"><span><b id="unlLabel">無限堂</b><span id="unlHint">（有效期間內不限堂數）</span></span></label>
           </div>
         </div>
         <div class="row">
           <label class="field">購買日 <input type="date" name="purchaseDate" required></label>
-          <label class="field">已使用堂數 <input type="number" name="used" min="0" max="500" value="0">
+          <label class="field"><span id="usedLabel">已使用堂數</span> <input type="number" name="used" min="0" max="9999" value="0">
             <span class="hint" id="usedHint" style="display:block;font-weight:400;margin-top:4px">新卡通常是 0；補登紙本紀錄時可填已上過的堂數</span></label>
         </div>
         <div class="row">
@@ -328,7 +336,7 @@
           <label class="field">到期日 <span class="hint">（含當天）</span><input type="date" name="endDate" required></label>
         </div>
         <div>
-          <span class="field" style="font-weight:600;font-size:.9rem">適用課程 <span class="hint" style="font-weight:400;color:var(--muted)">（都不勾 = 全部課程）</span></span>
+          <span class="field" style="font-weight:600;font-size:.9rem"><span id="catsLabel">適用課程</span> <span class="hint" style="font-weight:400;color:var(--muted)" id="catsHint">（都不勾 = 全部課程）</span></span>
           <div class="weekdays" id="passCats" style="gap:6px"></div>
         </div>
         <label class="field">備註 <span class="hint">（選填，例如繳費方式、金額）</span><input type="text" name="note" maxlength="200"></label>

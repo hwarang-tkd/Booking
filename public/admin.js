@@ -356,7 +356,16 @@
   }));
 
   function creditLine(x) {
-    const c = x.credits;
+    return classCredit(x.credits) + rentalCredit(x.credits.rental);
+  }
+  // 場地租借時數（沒有就不顯示）
+  function rentalCredit(r) {
+    if (!r || (!r.remaining && !r.unlimited)) return '';
+    const until = r.unlimited ? r.unlimitedUntil : r.nextExpiry, left = daysUntil(until);
+    return `<br><span class="badge ${left <= 7 ? 'warn' : 'ok'}">🏟 場租 ${r.unlimited ? '無限時數' : `剩 ${r.remaining} 小時`}</span>
+      <span class="${left <= 7 ? '' : 'muted'}">${fmtDate(until)} 到期</span>`;
+  }
+  function classCredit(c) {
     if (c.unlimited) {
       const left = daysUntil(c.unlimitedUntil);
       return `<span class="badge ${left <= 7 ? 'warn' : 'ok'}">🎫 無限堂</span>
@@ -551,6 +560,18 @@
     { label: '私人課 5 小時（5,000）', name: '私人課 5 小時', total: 5, months: 3, cats: ['private'] },
     { label: '無限堂（1 個月）', name: '無限堂月卡', unlimited: true, total: 1, months: 1, cats: GROUP },
   ];
+  // 場地租借時數（依收費表；有效期限可自行修改）
+  const RENTAL_PRESETS = [
+    { label: '團體課程 10 小時（5,000）', name: '團體課程 10 小時', total: 10, months: 3, cats: ['group'] },
+    { label: '團體課程 1 小時（600）', name: '團體課程 1 小時', total: 1, months: 1, cats: ['group'] },
+    { label: '一對一 1 小時（200）', name: '一對一 1 小時', total: 1, months: 1, cats: ['private'] },
+    { label: '自主訓練 1 小時（100）', name: '自主訓練 1 小時', total: 1, months: 1, cats: ['self'] },
+    { label: '自主訓練 無限時數（1 個月）', name: '自主訓練月卡', unlimited: true, total: 1, months: 1, cats: ['self'] },
+  ];
+  const RENTAL_TYPE_NAMES = { group: '團體課程', private: '一對一', self: '自主訓練' };
+  let passKind = 'class';
+  const unitOf = (k) => (k === 'rental' ? '小時' : '堂');
+  const presetsOf = () => (passKind === 'rental' ? RENTAL_PRESETS : PRESETS);
   // 勾選無限堂時，堂數欄位停用
   const syncUnlimited = () => {
     const f = $('passForm');
@@ -569,11 +590,42 @@
   const STATUS = { active: ['ok', '使用中'], future: ['', '尚未開始'], used: ['', '已用完'], expired: ['', '已過期'], void: ['danger', '已作廢'] };
   let passStudent = null, editingPass = null;
 
-  $('passCats').innerHTML = cfg.categories.filter((c) => c.id !== 'other').map((c) =>
-    `<label style="width:auto;padding:0 10px;font-size:.85rem;gap:6px"><input type="checkbox" value="${c.id}"><i style="width:10px;height:10px;border-radius:50%;background:${catColor(c.id)}"></i>${esc(catName(c.id))}</label>`).join('');
-  $('presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-preset="${i}">${esc(p.label)}</button>`).join('');
-  $('presets').querySelectorAll('[data-preset]').forEach((b) => b.onclick = () => {
-    const p = PRESETS[b.dataset.preset], f = $('passForm');
+  /** 切換卡種：上課堂數 / 場地租借時數（標籤、單位、適用範圍、快速方案都跟著換）。 */
+  function setKind(k, { locked = false } = {}) {
+    passKind = k;
+    const f = $('passForm'), rental = k === 'rental';
+    document.querySelectorAll('#passKind [data-k]').forEach((b) => {
+      b.setAttribute('aria-pressed', String(b.dataset.k === k));
+      b.disabled = locked && b.dataset.k !== k;
+    });
+    $('totalLabel').textContent = rental ? '時數（小時）' : '堂數';
+    $('usedLabel').textContent = rental ? '已使用時數' : '已使用堂數';
+    $('unlLabel').textContent = rental ? '無限時數' : '無限堂';
+    $('unlHint').textContent = rental ? '（有效期間內不限時數）' : '（有效期間內不限堂數）';
+    $('catsLabel').textContent = rental ? '適用租借' : '適用課程';
+    $('catsHint').textContent = rental ? '（都不勾 = 全部租借類型）' : '（都不勾 = 全部課程）';
+    f.total.step = f.used.step = rental ? '0.5' : '1';
+    f.total.min = rental ? '0.5' : '1';
+    f.total.max = rental ? '1000' : '500';
+    $('passCats').innerHTML = rental
+      ? Object.entries(RENTAL_TYPE_NAMES).map(([id, n]) => `<label style="width:auto;padding:0 10px;font-size:.85rem;gap:6px"><input type="checkbox" value="${id}">${esc(n)}</label>`).join('')
+      : cfg.categories.filter((c) => c.id !== 'other').map((c) =>
+        `<label style="width:auto;padding:0 10px;font-size:.85rem;gap:6px"><input type="checkbox" value="${c.id}"><i style="width:10px;height:10px;border-radius:50%;background:${catColor(c.id)}"></i>${esc(catName(c.id))}</label>`).join('');
+    $('presets').innerHTML = presetsOf().map((p, i) => `<button type="button" data-preset="${i}">${esc(p.label)}</button>`).join('');
+    $('presets').querySelectorAll('[data-preset]').forEach((b) => b.onclick = () => applyPreset(presetsOf()[b.dataset.preset]));
+    if (!editingPass) {
+      $('passFormTitle').textContent = rental ? '新增場地租借時數卡' : '新增堂數卡';
+      $('usedHint').textContent = rental ? '新卡通常是 0；補登時可填已用掉的時數' : '新卡通常是 0；補登紙本紀錄時可填已上過的堂數';
+      f.name.placeholder = rental ? '例如：團體課程 10 小時' : '例如：8 堂月卡';
+    }
+  }
+  document.querySelectorAll('#passKind [data-k]').forEach((b) => b.addEventListener('click', () => {
+    if (b.disabled) return;
+    setKind(b.dataset.k);
+    setCats(passKind === 'rental' ? [] : GROUP);
+  }));
+  function applyPreset(p) {
+    const f = $('passForm');
     f.name.value = p.name; f.total.value = p.total; f.unlimited.checked = !!p.unlimited; syncUnlimited();
     // 換方案（修改既有的卡）時保留原本的日期，例如已經展延過的到期日；新開卡才自動算到期日
     if (!editingPass) {
@@ -581,9 +633,11 @@
       f.endDate.value = addMonths(f.startDate.value, p.months);
     }
     setCats(p.cats);
-  });
+  }
   const setCats = (cats) => $('passCats').querySelectorAll('input').forEach((i) => { i.checked = cats.includes(i.value); });
-  const catsText = (cats) => (cats.length ? cats.map(catName).join(isEn ? ', ' : '、') : '全部課程');
+  const catsText = (cats, kind = 'class') => (kind === 'rental'
+    ? (cats.length ? cats.map((c) => RENTAL_TYPE_NAMES[c] || c).join(isEn ? ', ' : '、') : '全部租借類型')
+    : (cats.length ? cats.map(catName).join(isEn ? ', ' : '、') : '全部課程'));
 
   async function openPasses(x) {
     passStudent = x;
@@ -599,11 +653,13 @@
     f.purchaseDate.value = f.startDate.value = todayStr();
     f.purchaseDate.max = todayStr();
     f.endDate.value = addMonths(todayStr(), 1);
+    setKind('class');
     setCats(GROUP);
     f.used.value = 0;
     f.unlimited.checked = false; syncUnlimited();
     $('usedHint').textContent = '新卡通常是 0；補登紙本紀錄時可填已上過的堂數';
     $('passFormTitle').textContent = '新增堂數卡';
+    f.name.placeholder = '例如：8 堂月卡';
     $('passSave').textContent = '新增';
     $('passCancelEdit').classList.add('hidden');
     $('passErr').classList.add('hidden');
@@ -619,27 +675,28 @@
       box.innerHTML = '';
       for (const p of passes) {
         const [cls, label] = STATUS[p.status];
+        const u = unitOf(p.kind), rental = p.kind === 'rental';
         const el = document.createElement('div');
         el.className = 'card' + (p.status === 'active' || p.status === 'future' ? '' : ' past');
         el.style.cssText = 'margin-bottom:8px;padding:10px 12px;box-shadow:none';
         el.innerHTML = `
           <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
             <div style="flex:1;min-width:180px">
-              <b>${esc(p.name)}</b> <span class="badge ${cls}">${label}</span>
+              ${rental ? '<span class="badge warn">🏟 場地租借</span> ' : ''}<b>${esc(p.name)}</b> <span class="badge ${cls}">${label}</span>
               <div style="font-size:1.05rem;margin-top:2px">${p.unlimited
-                ? `<b>♾️ 無限堂</b> <span class="muted">已上 ${p.used} 堂</span>`
-                : `<b>剩 ${p.remaining}</b> <span class="muted">/ 共 ${p.total} 堂（已用 ${p.used}）</span>`}</div>
-              ${p.adjust ? `<div class="muted" style="font-size:.82rem">系統預約扣 ${p.bookedUsed} 堂・手動調整 ${p.adjust > 0 ? '+' : ''}${p.adjust} 堂</div>` : ''}
+                ? (rental ? `<b>♾️ 無限時數</b> <span class="muted">已用 ${p.used} 小時</span>` : `<b>♾️ 無限堂</b> <span class="muted">已上 ${p.used} 堂</span>`)
+                : `<b>剩 ${p.remaining}</b> <span class="muted">/ 共 ${p.total} ${u}（已用 ${p.used}）</span>`}</div>
+              ${p.adjust ? `<div class="muted" style="font-size:.82rem">${rental ? '系統租借扣' : '系統預約扣'} ${p.bookedUsed} ${u}・手動調整 ${p.adjust > 0 ? '+' : ''}${p.adjust} ${u}</div>` : ''}
               <div class="muted" style="font-size:.85rem">購買日 ${fmtDate(p.purchaseDate)}・有效 ${fmtDate(p.startDate)} – ${fmtDate(p.endDate)}</div>
-              <div class="muted" style="font-size:.85rem">${esc(catsText(p.categories))}</div>
+              <div class="muted" style="font-size:.85rem">${esc(catsText(p.categories, p.kind))}</div>
               ${p.note ? `<div style="font-size:.85rem">📝 ${esc(p.note)}</div>` : ''}
               ${p.logs && p.logs.length ? `<details style="margin-top:4px;font-size:.82rem"><summary class="muted" style="cursor:pointer">異動紀錄（${p.logs.length}）</summary>
                 <ul style="margin:4px 0 0;padding-left:1.2em">${p.logs.map((l) => `<li><span class="muted">${logTime(l.at)}</span> ${esc(logText(l))}</li>`).join('')}</ul></details>` : ''}
             </div>
             <div class="btns" style="margin:0">
               ${p.status === 'void' ? '' : `
-                <button class="btn secondary small" data-a="minus" ${!p.unlimited && p.remaining <= 0 ? 'disabled' : ''} title="例如學員沒預約直接來上課">扣 1 堂</button>
-                <button class="btn secondary small" data-a="plus" ${p.used <= 0 ? 'disabled' : ''}>補回 1 堂</button>`}
+                <button class="btn secondary small" data-a="minus" ${!p.unlimited && p.remaining <= 0 ? 'disabled' : ''} title="${rental ? '例如現場使用、沒有線上預約' : '例如學員沒預約直接來上課'}">扣 1 ${u}</button>
+                <button class="btn secondary small" data-a="plus" ${p.used <= 0 ? 'disabled' : ''}>補回 1 ${u}</button>`}
               ${p.status === 'void' ? '' : '<button class="btn secondary small" data-a="extend">展延</button>'}
               <button class="btn secondary small" data-a="edit">修改／換方案</button>
               ${p.status === 'void' ? '<button class="btn secondary small" data-a="restore">恢復</button>'
@@ -652,10 +709,13 @@
           editingPass = p;
           const f = $('passForm');
           f.name.value = p.name; f.total.value = p.total || 1; f.startDate.value = p.startDate; f.endDate.value = p.endDate;
+          setKind(p.kind, { locked: true });
           f.unlimited.checked = p.unlimited; syncUnlimited();
           f.purchaseDate.value = p.purchaseDate || p.startDate;
           f.used.value = p.used;
-          $('usedHint').textContent = `系統預約自動扣了 ${p.bookedUsed} 堂；直接改這個數字可以修正（補登、現場上課未預約、扣錯補回）`;
+          $('usedHint').textContent = rental
+            ? `系統租借自動扣了 ${p.bookedUsed} 小時；直接改這個數字可以修正（補登、現場使用、扣錯補回）`
+            : `系統預約自動扣了 ${p.bookedUsed} 堂；直接改這個數字可以修正（補登、現場上課未預約、扣錯補回）`;
           f.note.value = p.note; setCats(p.categories);
           $('passFormTitle').textContent = `修改「${p.name}」（可點上方方案直接更換）`;
           $('passSave').textContent = '儲存';
@@ -667,8 +727,8 @@
         const adjust = async (delta) => {
           try {
             const r = await call(`/api/admin/passes/${p.id}/adjust`, { method: 'POST', body: { delta } });
-            toast(r.pass.unlimited ? `已${delta < 0 ? '補回' : '扣'} 1 堂（已上 ${r.pass.used} 堂）`
-              : delta < 0 ? `已補回 1 堂，剩 ${r.pass.remaining} 堂` : `已扣 1 堂，剩 ${r.pass.remaining} 堂`);
+            toast(r.pass.unlimited ? `已${delta < 0 ? '補回' : '扣'} 1 ${u}（已用 ${r.pass.used} ${u}）`
+              : delta < 0 ? `已補回 1 ${u}，剩 ${r.pass.remaining} ${u}` : `已扣 1 ${u}，剩 ${r.pass.remaining} ${u}`);
             after();
           } catch (e) { fail(e); }
         };
@@ -708,8 +768,8 @@
     const x = l.detail || {};
     switch (l.action) {
       case 'create': return isEn
-        ? `Created: ${x.name}, ${x.unlimited ? 'unlimited' : `${x.total} credits`}, expires ${fmtDate(x.end)}${x.used ? `, ${x.used} already used (backfilled)` : ''}`
-        : `開卡：${x.name} ${x.unlimited ? '無限堂' : `${x.total} 堂`}，${fmtDate(x.end)} 到期${x.used ? `，補登已用 ${x.used} 堂` : ''}`;
+        ? `Created: ${x.name}, ${x.unlimited ? 'unlimited' : `${x.total} ${x.kind === 'rental' ? 'hours' : 'credits'}`}, expires ${fmtDate(x.end)}${x.used ? `, ${x.used} already used (backfilled)` : ''}`
+        : `開卡：${x.name} ${x.unlimited ? (x.kind === 'rental' ? '無限時數' : '無限堂') : `${x.total} ${unitOf(x.kind)}`}，${fmtDate(x.end)} 到期${x.used ? `，補登已用 ${x.used} ${unitOf(x.kind)}` : ''}`;
       case 'edit': return (isEn ? 'Changed: ' : '修改：') + x.changes.map(([k, a, b]) => `${FIELD[k] || k} ${fmtVal(k, a)} → ${fmtVal(k, b)}`).join(isEn ? '; ' : '、');
       case 'extend': return (isEn ? `Extended: ${fmtDate(x.from)} → ${fmtDate(x.to)}` : `展延：${fmtDate(x.from)} → ${fmtDate(x.to)}`)
         + (x.reason ? `（${x.reason}）` : '');
@@ -754,14 +814,14 @@
     ev.preventDefault();
     const f = ev.target;
     const body = {
-      name: f.name.value, total: Number(f.total.value), unlimited: f.unlimited.checked, purchaseDate: f.purchaseDate.value,
+      name: f.name.value, kind: passKind, total: Number(f.total.value), unlimited: f.unlimited.checked, purchaseDate: f.purchaseDate.value,
       startDate: f.startDate.value, endDate: f.endDate.value, note: f.note.value, used: Number(f.used.value || 0),
       categories: [...$('passCats').querySelectorAll('input:checked')].map((i) => i.value),
     };
     try {
       if (editingPass) await call(`/api/admin/passes/${editingPass.id}`, { method: 'PUT', body });
       else await call(`/api/admin/students/${passStudent.id}/passes`, { method: 'POST', body });
-      toast(editingPass ? '已儲存' : `已幫 ${passStudent.name} 開「${body.name.trim()}」${body.unlimited ? '（無限堂）' : `${body.total} 堂`}`);
+      toast(editingPass ? '已儲存' : `已幫 ${passStudent.name} 開「${body.name.trim()}」${body.unlimited ? '（無限）' : `${body.total} ${unitOf(passKind)}`}`);
       resetPassForm(); loadPasses(); loadStudents();
     } catch (e) { showError($('passErr'), e.message); }
   });
@@ -819,7 +879,7 @@
       const to = addDays(rWeek, 7);
       $('rRange').textContent = `${fmtDate(rWeek)} – ${fmtDate(addDays(rWeek, 6))}`;
       const { rentals } = await call(`/api/admin/rentals?from=${rWeek}&to=${to}`);
-      const live = rentals.filter((r) => r.status === 'active');
+      const live = rentals.filter((r) => r.status === 'active' && !r.passName);   // 扣時數的不另外收費
       const total = live.reduce((n, r) => n + r.price, 0), unpaid = live.filter((r) => !r.paid).reduce((n, r) => n + r.price, 0);
       $('rSum').textContent = `本週 ${live.length} 筆租借，共 ${total.toLocaleString()} 元，未收款 ${unpaid.toLocaleString()} 元`;
       if (!rentals.length) { box.innerHTML = '<div class="card empty">這週沒有場地租借</div>'; return; }
@@ -837,13 +897,13 @@
           <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
             <div style="flex:1;min-width:200px">
               <b>${r.start}–${r.end}</b>　${esc(RTYPE(r.type))}${r.type === 'self' ? `・${r.people} 人` : ''}
-              ${cancelled ? '<span class="badge">已取消</span>' : r.paid ? '<span class="badge ok">已付款</span>' : '<span class="badge warn">未付款</span>'}
+              ${cancelled ? '<span class="badge">已取消</span>' : r.passName ? '<span class="badge ok">扣時數</span>' : r.paid ? '<span class="badge ok">已付款</span>' : '<span class="badge warn">未付款</span>'}
               <div style="font-size:.9rem">${esc(r.contactName)}${r.contactPhone ? `・<a href="tel:${esc(r.contactPhone)}">${esc(r.contactPhone)}</a>` : ''}
                 ${r.bookedBy === 'admin' ? '<span class="badge">代訂</span>' : ''}</div>
-              <div class="muted" style="font-size:.85rem">${r.price.toLocaleString()} 元${r.note ? `・${esc(r.note)}` : ''}</div>
+              <div class="muted" style="font-size:.85rem">${r.passName ? `🏟 ${esc(r.passName)}（扣 ${r.units} 小時）` : `${r.price.toLocaleString()} 元`}${r.note ? `・${esc(r.note)}` : ''}</div>
             </div>
             ${cancelled ? '' : `<div class="btns" style="margin:0">
-              <button class="btn secondary small" data-a="paid">${r.paid ? '改為未付款' : '標記已收款'}</button>
+              ${r.passName ? '' : `<button class="btn secondary small" data-a="paid">${r.paid ? '改為未付款' : '標記已收款'}</button>`}
               <button class="btn danger small" data-a="cancel">取消</button></div>`}
           </div>`;
         const a = (n, fn) => { const b = el.querySelector(`[data-a="${n}"]`); if (b) b.onclick = fn; };
@@ -877,9 +937,12 @@
         studentId: st ? st.id : undefined, contactName: st ? undefined : f.who.value, contactPhone: f.phone.value,
         type: f.type.value, date: f.date.value, start: f.start.value, hours: Number(f.hours.value),
         people: Number(f.people.value), repeatWeeks: Number(f.repeat.value), note: f.note.value,
+        usePass: f.nopass.checked ? 'none' : 'auto',
       } });
       msg.className = 'alert ok';
-      msg.textContent = `✅ 已代訂 ${r.created} 筆（每筆 ${r.price.toLocaleString()} 元）`;
+      msg.textContent = r.deducted
+        ? `✅ 已代訂 ${r.created} 筆，其中 ${r.deducted} 筆扣場租時數${r.pass && !r.pass.unlimited ? `（「${r.pass.name}」剩 ${r.pass.remaining} 小時）` : ''}`
+        : `✅ 已代訂 ${r.created} 筆（每筆 ${r.price.toLocaleString()} 元）`;
       rWeek = mondayOf(f.date.value);
       loadRentals();
     } catch (e) { if (e.status !== 401) showError(msg, e.message); }

@@ -525,6 +525,9 @@ describe('API', () => {
     assert.equal(cfgR.types.group.rate, 600); assert.equal(cfgR.types.private.cap, 3); assert.equal(cfgR.types.self.cap, 6);
     const st = (await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '租場地', email: 'rent@example.com' } })).data.id;
     const t = (await login('rent@example.com')).data.token;
+    // 場地租借時數卡（50 小時，全部租借類型）
+    await req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: token, body: {
+      kind: 'rental', name: '場租 50 小時', total: 50, startDate: today(), endDate: T.addDays(today(), 60) } });
     // 10:00–11:00 有課
     const cls = (await req('/api/admin/slots', { method: 'POST', auth: token, body: {
       title: '早課', date: d, time: '10:00', duration: 60, capacity: 5 } })).data.id;
@@ -589,6 +592,65 @@ describe('API', () => {
     const after = (await req(`/api/admin/rentals?from=${d}&to=${T.addDays(d, 1)}`, { auth: token })).data.rentals.find((r) => r.id === one.id);
     assert.equal(after.paid, true); assert.equal(after.status, 'cancelled');
     assert.equal((await req('/api/admin/rentals', { auth: t })).status, 401);
+  });
+
+  test('場地租借時數卡：沒有時數不能租、扣時數、適用類型、取消退回、代訂扣或不扣', async () => {
+    const d = T.addDays(today(), 4);
+    const st = (await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '時數生', email: 'hours@example.com' } })).data.id;
+    const t = (await login('hours@example.com')).data.token;
+    const rent = (body) => req('/api/rentals', { method: 'POST', auth: t, body: { date: d, hours: 1, ...body } });
+    const passes = async () => (await req(`/api/admin/students/${st}/passes`, { auth: token })).data.passes;
+    // 只有上課堂數卡、沒有場租卡 → 不能租
+    await req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: token, body: { name: '8 堂', total: 8, startDate: today(), endDate: T.addDays(d, 10) } });
+    const no = await rent({ type: 'self', start: '09:00' });
+    assert.equal(no.status, 409);
+    assert.equal(no.data.code, 'NO_RENTAL_PASS');
+    // 場租卡 5 小時，只限自主訓練；時數可以有半小時
+    const mk = (body) => req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: token, body: {
+      kind: 'rental', startDate: today(), endDate: T.addDays(d, 10), ...body } });
+    assert.equal((await mk({ name: 'x', total: 2.3 })).status, 400);
+    const selfCard = (await mk({ name: '自主訓練 5 小時', total: 5, categories: ['self', 'tkd'] })).data.id;
+    let p = (await passes()).find((x) => x.id === selfCard);
+    assert.equal(p.kind, 'rental'); assert.deepEqual(p.categories, ['self']); // 只留租借類型
+    // 預覽
+    const pv = await req(`/api/rentals/preview?type=self&date=${d}&start=09:00&hours=1.5&people=2`, { auth: t });
+    assert.equal(pv.data.pass.name, '自主訓練 5 小時'); assert.equal(pv.data.units, 3);
+    // 2 人 × 1.5 小時 = 扣 3 小時
+    const r1 = await rent({ type: 'self', start: '09:00', hours: 1.5, people: 2 });
+    assert.equal(r1.status, 201);
+    assert.equal(r1.data.pass.remaining, 2);
+    assert.equal(r1.data.rental.units, 3);
+    // 只剩 2 小時，3 人 × 1 小時不夠
+    assert.equal((await rent({ type: 'self', start: '11:00', people: 3 })).data.code, 'NO_RENTAL_PASS');
+    // 一對一不在適用範圍
+    assert.equal((await rent({ type: 'private', start: '11:00' })).data.code, 'NO_RENTAL_PASS');
+    // 上課堂數卡不會被場地租借扣
+    p = (await passes()).find((x) => x.name === '8 堂');
+    assert.equal(p.used, 0);
+    // 取消退回時數
+    const mine = (await req('/api/my/rentals', { auth: t })).data.rentals;
+    assert.equal(mine[0].passName, '自主訓練 5 小時');
+    await req(`/api/my/rentals/${mine[0].id}/cancel`, { method: 'POST', auth: t });
+    assert.equal((await passes()).find((x) => x.id === selfCard).remaining, 5);
+    // 扣／補回半小時、修改已用時數
+    assert.equal((await req(`/api/admin/passes/${selfCard}/adjust`, { method: 'POST', auth: token, body: { delta: 0.5 } })).data.pass.used, 0.5);
+    assert.equal((await req(`/api/admin/passes/${selfCard}/adjust`, { method: 'POST', auth: token, body: { delta: 0.3 } })).status, 400);
+    assert.equal((await req(`/api/admin/passes/${selfCard}`, { method: 'PUT', auth: token, body: {
+      name: '自主訓練 5 小時', total: 5, used: 1.5, startDate: today(), endDate: T.addDays(d, 10), categories: ['self'] } })).status, 200);
+    p = (await passes()).find((x) => x.id === selfCard);
+    assert.equal(p.used, 1.5); assert.equal(p.kind, 'rental'); assert.deepEqual(p.categories, ['self']);
+    // 老師代訂：學員有時數就扣；usePass none 不扣；外部人士不扣
+    const ad = await req('/api/admin/rentals', { method: 'POST', auth: token, body: { studentId: st, type: 'self', date: d, start: '13:00', hours: 1 } });
+    assert.equal(ad.data.deducted, 1);
+    assert.equal(ad.data.pass.remaining, 2.5);
+    const ad2 = await req('/api/admin/rentals', { method: 'POST', auth: token, body: { studentId: st, type: 'self', date: d, start: '14:00', hours: 1, usePass: 'none' } });
+    assert.equal(ad2.data.deducted, 0);
+    const ad3 = await req('/api/admin/rentals', { method: 'POST', auth: token, body: { studentId: st, type: 'private', date: d, start: '15:00', hours: 1 } });
+    assert.equal(ad3.status, 201); assert.equal(ad3.data.deducted, 0); // 沒有適用的卡也可以代訂
+    // 學員列表摘要分開顯示
+    const me = (await req('/api/admin/students', { auth: token })).data.students.find((x) => x.id === st);
+    assert.equal(me.credits.remaining, 8);
+    assert.equal(me.credits.rental.remaining, 2.5);
   });
 
   test('報表匯出：依期間、依學員，JSON 與 Excel', async () => {

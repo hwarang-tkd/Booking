@@ -75,18 +75,20 @@
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap">
           <b>${many ? `👤 ${esc(p.studentName)}・` : ''}${esc(p.name)}</b> <span class="badge ${label[p.status][0]}">${label[p.status][1]}</span>
         </div>
+        ${p.kind === 'rental' ? '<span class="badge warn" style="margin-top:4px">🏟 場地租借時數</span>' : ''}
         ${p.unlimited
-          ? `<div style="font-size:1.5rem;font-weight:800;margin-top:4px">♾️ 無限堂
-              <span class="muted" style="font-size:.9rem;font-weight:400">已上 ${p.used} 堂</span></div>`
-          : `<div style="font-size:1.5rem;font-weight:800;margin-top:4px">剩 ${p.remaining} 堂
-              <span class="muted" style="font-size:.9rem;font-weight:400">／共 ${p.total} 堂</span></div>
+          ? `<div style="font-size:1.5rem;font-weight:800;margin-top:4px">♾️ ${p.kind === 'rental' ? '無限時數' : '無限堂'}
+              <span class="muted" style="font-size:.9rem;font-weight:400">${p.kind === 'rental' ? `已用 ${p.used} 小時` : `已上 ${p.used} 堂`}</span></div>`
+          : `<div style="font-size:1.5rem;font-weight:800;margin-top:4px">剩 ${p.remaining} ${p.kind === 'rental' ? '小時' : '堂'}
+              <span class="muted" style="font-size:.9rem;font-weight:400">／共 ${p.total} ${p.kind === 'rental' ? '小時' : '堂'}</span></div>
             <div class="bar"><i style="width:${pct}%"></i></div>`}
         <div class="${live && days <= 7 ? '' : 'muted'}" style="font-size:.88rem;margin-top:6px">
           ${p.status === 'future' ? `${fmtDate(p.startDate)} 開始・` : ''}有效期限至 ${fmtDate(p.endDate)}<br>
           <span class="muted">購買日 ${fmtDate(p.purchaseDate)}</span>
           ${live ? (days <= 7 ? `<b style="color:var(--warn)">（還有 ${days} 天，記得用完喔）</b>` : `（還有 ${days} 天）`) : ''}
         </div>
-        ${p.categories.length ? `<div class="muted" style="font-size:.82rem">適用：${p.categories.map(catName).join('、')}</div>` : ''}
+        ${p.categories.length ? `<div class="muted" style="font-size:.82rem">適用：${p.categories.map((c) => (p.kind === 'rental'
+          ? ({ group: '團體課程', private: '一對一', self: '自主訓練' }[c] || c) : catName(c))).join('、')}</div>` : ''}
       </div>`;
     }).join('') + (many ? auth.students
       .filter((st) => !passes.some((p) => p.studentId === st.id && p.status === 'active'))
@@ -149,9 +151,9 @@
           <div class="time"><b>${r.start}</b><small>${fmtDate(r.date)}</small></div>
           <div class="info">
             <div class="title" ${cancelled ? 'style="text-decoration:line-through;opacity:.6"' : ''}>${esc(RENT_NAME[r.type])}${r.type === 'self' ? `・${r.people} 人` : ''}</div>
-            <div class="note">${r.start}–${r.end}・${r.price.toLocaleString()} 元${r.note ? `・${esc(r.note)}` : ''}</div>
+            <div class="note">${r.start}–${r.end}・${r.passName ? `🏟 ${esc(r.passName)}（${r.units} 小時）` : `${r.price.toLocaleString()} 元`}${r.note ? `・${esc(r.note)}` : ''}</div>
             <div class="meta">${cancelled ? '<span class="badge">已取消</span>' : r.past ? '<span class="badge">已使用</span>' : '<span class="badge ok">已預約</span>'}
-              ${!cancelled ? (r.paid ? '<span class="badge ok">已付款</span>' : '<span class="badge warn">尚未付款</span>') : ''}</div>
+              ${!cancelled && !r.passName ? (r.paid ? '<span class="badge ok">已付款</span>' : '<span class="badge warn">尚未付款</span>') : ''}</div>
           </div>
           ${r.cancellable ? '<div class="actions"><button class="btn danger small">取消</button></div>' : ''}`;
         el.querySelector('button')?.addEventListener('click', async (ev) => {

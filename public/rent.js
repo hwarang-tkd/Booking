@@ -12,7 +12,9 @@
   const price = (k, minutes, people) => Math.round(rc.types[k].rate * (minutes / 60) * (rc.types[k].per === 'person-hour' ? people : 1));
 
   $('intro').textContent = `只能租沒有課程的時段。開放時間 ${rc.open}–${rc.close}，需在開始前 ${rc.cutoffHours} 小時完成預約。`;
-  $('rules').textContent = `費用請於使用前付清。開始前 ${rc.cancelHours} 小時內無法線上取消。`;
+  $('rules').textContent = rc.requirePass
+    ? `租借會扣你的場地租借時數（自主訓練按人數 × 小時）。開始前 ${rc.cancelHours} 小時內無法線上取消，取消會退回時數。`
+    : `費用請於使用前付清。開始前 ${rc.cancelHours} 小時內無法線上取消。`;
 
   // ---------- 類型 ----------
   const DESC = {
@@ -112,15 +114,55 @@
     });
   }
 
+  // 顯示會扣哪張場地租借時數卡；需要時數但沒有時，不能送出
+  let previewSeq = 0, passOk = !rc.requirePass;
+  async function previewPass() {
+    const box = $('passBox'), seq = ++previewSeq;
+    if (!f.start.value || !f.hours.value) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    if (!auth.token) {
+      box.textContent = rc.requirePass ? '租借需要「場地租借時數」，登入後會顯示你可以用的時數。' : '';
+      passOk = true;
+      $('submit').disabled = false;
+      return;
+    }
+    const q = new URLSearchParams({ type, date, start: f.start.value, hours: f.hours.value,
+      people: type === 'self' ? f.people.value : 1 });
+    if (f.studentId.value) q.set('studentId', f.studentId.value);
+    box.textContent = '確認時數中…';
+    try {
+      const r = await sapi('/api/rentals/preview?' + q);
+      if (seq !== previewSeq) return;
+      if (r.pass) {
+        box.innerHTML = r.pass.unlimited
+          ? `🏟 將使用「<b>${esc(r.pass.name)}</b>」（無限時數，${fmtDate(r.pass.endDate)} 到期）`
+          : `🏟 將使用「<b>${esc(r.pass.name)}</b>」扣 <b>${r.units}</b> 小時，租借後剩 <b>${r.pass.remaining - r.units}</b> 小時（${fmtDate(r.pass.endDate)} 到期）`;
+        passOk = true;
+      } else if (r.required) {
+        box.innerHTML = `⚠️ 你沒有足夠的<b>場地租借時數</b>（這次需要 ${r.units} 小時）。請聯絡老師購買或續約。`;
+        passOk = false;
+      } else {
+        box.textContent = '這次租借不會扣時數。';
+        passOk = true;
+      }
+    } catch (e) {
+      if (seq === previewSeq) { box.textContent = e.message; passOk = false; }
+    }
+    $('submit').disabled = !passOk;
+  }
+
   function summary() {
     const ok = f.start.value && f.hours.value;
     $('submit').disabled = !ok;
+    previewPass();
     if (!ok) { $('summary').textContent = '請選擇可租借的開始時間。'; return; }
     const people = type === 'self' ? Number(f.people.value) : 1;
     const minutes = Number(f.hours.value) * 60;
     const end = toTime(toMin(f.start.value) + minutes);
     $('summary').innerHTML = `<b>${esc(tName(type))}</b>${type === 'self' ? `・${people} 人` : ''}<br>
-      ${fmtDate(date)} ${f.start.value}–${end}（${f.hours.value} 小時）<br>費用：<b>${price(type, minutes, people).toLocaleString()} 元</b>`;
+      ${fmtDate(date)} ${f.start.value}–${end}（${f.hours.value} 小時）<br>${rc.requirePass
+        ? `扣 <b>${Number(f.hours.value) * people}</b> 小時（價值 ${price(type, minutes, people).toLocaleString()} 元）`
+        : `費用：<b>${price(type, minutes, people).toLocaleString()} 元</b>`}`;
   }
   f.start.addEventListener('change', () => { fillHours(); summary(); });
   f.hours.addEventListener('change', () => { fillHours(); summary(); });
@@ -132,13 +174,16 @@
     f.studentId.innerHTML = sts.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('');
   }
   renderWho();
+  f.studentId.addEventListener('change', previewPass);
 
   f.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     if (!auth.token) {
       if (!(await loginDialog('請先登入，再租借場地。'))) return;
       renderWho();
+      await previewPass();
       if (auth.students.length > 1) { toast('請選擇租借人'); return; }
+      if (!passOk) return;
     }
     const btn = $('submit');
     btn.disabled = true;
@@ -147,7 +192,9 @@
         type, date, start: f.start.value, hours: Number(f.hours.value), people: Number(f.people.value || 1),
         note: f.note.value, studentId: f.studentId.value || undefined,
       } });
-      toast(`✅ 已租借 ${fmtDate(r.rental.date)} ${r.rental.start}–${r.rental.end}，費用 ${r.rental.price.toLocaleString()} 元`);
+      toast(`✅ 已租借 ${fmtDate(r.rental.date)} ${r.rental.start}–${r.rental.end}`
+        + (r.pass ? (r.pass.unlimited ? `，使用「${r.pass.name}」` : `，「${r.pass.name}」剩 ${r.pass.remaining} 小時`)
+          : `，費用 ${r.rental.price.toLocaleString()} 元`));
       f.note.value = '';
       loadDay();
     } catch (e) {
