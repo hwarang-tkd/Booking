@@ -486,6 +486,29 @@ function createApp(cfg) {
     return { ok: true };
   });
 
+  // ----- 寄信設定（忘記密碼用） -----
+  route('GET', /^\/api\/admin\/mail-status$/, (req) => {
+    requireAdmin(req);
+    return { enabled: mailer.enabled, from: cfg.mailFrom, publicUrl: cfg.publicUrl, detectedUrl: baseUrl(req) };
+  });
+
+  route('POST', /^\/api\/admin\/mail-test$/, async (req, url, body) => {
+    requireAdmin(req);
+    if (!mailer.enabled) throw new HttpError(409, '尚未設定 RESEND_API_KEY 和 MAIL_FROM');
+    const to = normEmail(body.to);
+    try {
+      await mailer.send({
+        to,
+        subject: `${cfg.schoolName}｜測試信 Test email`,
+        text: `這是 ${cfg.schoolName} 約課網站的測試信，收到代表「忘記密碼」寄信設定成功。\n\nThis is a test email from ${cfg.schoolNameEn}.`,
+        html: `<p>這是 ${cfg.schoolName} 約課網站的測試信，收到代表「忘記密碼」寄信設定成功。</p><p>This is a test email from ${cfg.schoolNameEn}.</p>`,
+      });
+    } catch (e) {
+      throw new HttpError(502, `寄信失敗：${e.message}`);
+    }
+    return { ok: true };
+  });
+
   // ----- 學員資料 -----
   // 產生設定／重設密碼連結（老師用 LINE 等方式傳給學員）
   route('POST', /^\/api\/admin\/students\/(\d+)\/reset-link$/, (req, url, body, [, id]) => {

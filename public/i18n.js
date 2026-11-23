@@ -186,6 +186,15 @@ const EN = {
   '請填寫學員資料': 'Please fill in the student details', '寄信失敗，請稍後再試或聯絡老師': 'Couldn\'t send the email. Please try again later or contact your instructor.',
   '目前的密碼不正確': 'Current password is incorrect', '密碼太長': 'Password is too long',
 
+  // 寄信設定
+  '📧 忘記密碼寄信設定：': '📧 Password-reset email: ', '檢查中…': 'Checking…', '已設定': 'Configured', '尚未設定': 'Not configured',
+  '寄一封測試信到': 'Send a test email to', '你的信箱': 'your email', '寄測試信': 'Send test', '寄件者：': 'Sender: ',
+  '信中連結網址：': 'Link URL: ', '建議在 Railway 設定 PUBLIC_URL，例如 https://booking.hwarang-tkd-tw.com':
+    'Tip: set PUBLIC_URL in Railway, e.g. https://booking.hwarang-tkd-tw.com',
+  '還沒設定寄信，學員按「忘記密碼」時會請他聯絡老師；你可以先用學員卡片上的「密碼連結」。設定步驟請看專案裡的 DEPLOY.md「五、設定寄信」。':
+    'Email isn\'t set up. Students who forget their password are asked to contact you — use "Password link" on their card. Setup steps: DEPLOY.md, section 5.',
+  '尚未設定 RESEND_API_KEY 和 MAIL_FROM': 'RESEND_API_KEY and MAIL_FROM are not set',
+
   // 伺服器訊息
   '找不到這堂課': 'Class not found', '這堂課已停課': 'This class has been cancelled',
   '這堂課已經開始或已截止預約': 'This class has started or booking has closed', '這堂課已額滿': 'This class is full',
@@ -313,6 +322,9 @@ const PATTERNS = [
   ['⚠️ 須留意：{}', (n) => `⚠️ Note: ${n}`], ['自行註冊 {}', (d) => `Self-registered ${d}`],
   ['（{}），點開就能設定密碼：', (e) => ` (${e}). Opening it lets them set a password:`],
   ['{} 天內有效，只能使用一次。同一個信箱的家人共用這組密碼。', (n) => `Valid for ${n} days, single use. Family members on the same email share this password.`],
+
+  ['已寄出，請到 {} 收信（也看一下垃圾郵件匣）。', (e) => `Sent — check ${e} (and the spam folder).`],
+  ['寄信失敗：{}', (m) => `Sending failed: ${m}`],
 
   // 後台：固定課表
   ['{}・名額 {}', (s, n) => `${s} · capacity ${n}`], ['名額 {}', (n) => `Capacity ${n}`],

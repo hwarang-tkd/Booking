@@ -57,6 +57,18 @@
       <!-- 學員資料 -->
       <div id="tab-students" class="hidden">
         <p class="sub">學員用這裡登記的<b>信箱</b>登入網站約課。停用的學員無法登入。</p>
+        <details class="card" id="mailBox" style="margin-bottom:14px;padding:12px 14px">
+          <summary style="cursor:pointer;font-weight:700">📧 忘記密碼寄信設定：<span id="mailState">檢查中…</span></summary>
+          <div class="stack" style="margin-top:10px">
+            <div id="mailInfo" style="font-size:.9rem"></div>
+            <form id="mailTest" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+              <label class="field" style="flex:1;min-width:220px">寄一封測試信到
+                <input type="email" name="to" required placeholder="你的信箱"></label>
+              <button class="btn" type="submit">寄測試信</button>
+            </form>
+            <div id="mailMsg" class="hidden"></div>
+          </div>
+        </details>
         <div class="toolbar">
           <input type="search" id="stSearch" placeholder="搜尋姓名、信箱、電話" style="flex:1;min-width:180px;margin:0;min-height:36px">
           <button class="btn small" id="stAdd">＋ 新增學員</button>

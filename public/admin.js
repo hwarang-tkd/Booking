@@ -70,7 +70,33 @@
     loadSchedule();
     loadBirthdays();
     loadStudents(true);
+    loadMailStatus();
   }
+
+  // ---------- 寄信設定狀態 ----------
+  async function loadMailStatus() {
+    try {
+      const r = await call('/api/admin/mail-status');
+      $('mailState').innerHTML = r.enabled ? '<span class="badge ok">已設定</span>' : '<span class="badge warn">尚未設定</span>';
+      $('mailInfo').innerHTML = r.enabled
+        ? `寄件者：<b>${esc(r.from)}</b><br>信中連結網址：<b>${esc(r.publicUrl || r.detectedUrl)}</b>
+           ${r.publicUrl ? '' : '<br><span class="health">建議在 Railway 設定 PUBLIC_URL，例如 https://booking.hwarang-tkd-tw.com</span>'}`
+        : '還沒設定寄信，學員按「忘記密碼」時會請他聯絡老師；你可以先用學員卡片上的「密碼連結」。設定步驟請看專案裡的 DEPLOY.md「五、設定寄信」。';
+      $('mailTest').classList.toggle('hidden', !r.enabled);
+      if (!r.enabled) $('mailBox').open = true;
+    } catch (e) { if (e.status !== 401) $('mailState').textContent = e.message; }
+  }
+  $('mailTest').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const msg = $('mailMsg'), btn = ev.target.querySelector('button');
+    btn.disabled = true;
+    try {
+      await call('/api/admin/mail-test', { method: 'POST', body: { to: ev.target.to.value } });
+      msg.className = 'alert ok';
+      msg.textContent = `已寄出，請到 ${ev.target.to.value.trim()} 收信（也看一下垃圾郵件匣）。`;
+    } catch (e) { if (e.status !== 401) showError(msg, e.message); }
+    finally { btn.disabled = false; }
+  });
 
   $('loginForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();

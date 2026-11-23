@@ -534,6 +534,15 @@ describe('註冊、密碼、忘記密碼', () => {
     assert.equal((await req('/api/login', { method: 'POST', body: { email: 'old@example.com', password: 'viaadmin1' } })).status, 200);
   });
 
+  test('後台寄信設定狀態與測試信', async () => {
+    const st = await req('/api/admin/mail-status', { auth: admin });
+    assert.equal(st.data.enabled, true);
+    sent.length = 0;
+    assert.equal((await req('/api/admin/mail-test', { method: 'POST', auth: admin, body: { to: 'me@example.com' } })).status, 200);
+    assert.equal(sent[0].to, 'me@example.com');
+    assert.equal((await req('/api/admin/mail-test', { method: 'POST', body: { to: 'me@example.com' } })).status, 401);
+  });
+
   test('名單顯示身心狀況與攝影同意', async () => {
     const d = today();
     const slot = (await req('/api/admin/slots', { method: 'POST', auth: admin, body: {
