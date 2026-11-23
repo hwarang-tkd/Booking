@@ -248,7 +248,10 @@
         </div>
         <div class="row">
           <label class="field">方案名稱 <input type="text" name="name" maxlength="40" required placeholder="例如：8 堂月卡"></label>
-          <label class="field">堂數 <input type="number" name="total" min="1" max="500" required value="8"></label>
+          <div>
+            <label class="field">堂數 <input type="number" name="total" min="1" max="500" required value="8"></label>
+            <label class="check" style="margin-top:6px;font-size:.9rem"><input type="checkbox" name="unlimited"><span><b>無限堂</b>（有效期間內不限堂數）</span></label>
+          </div>
         </div>
         <div class="row">
           <label class="field">購買日 <input type="date" name="purchaseDate" required></label>

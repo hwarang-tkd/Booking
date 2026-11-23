@@ -472,6 +472,53 @@ describe('API', () => {
     assert.equal((await req(`/api/admin/passes/${fresh}`, { method: 'DELETE', auth: token })).status, 409);
   });
 
+  test('無限堂：不限堂數、優先使用、可展延', async () => {
+    const d = today();
+    const st = (await req('/api/admin/students', { method: 'POST', auth: token, body: { name: '無限生', email: 'unl@example.com' } })).data.id;
+    const t = (await login('unl@example.com')).data.token;
+    const mk = (body) => req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: token, body });
+    // 一般卡先開、而且比較早到期；無限堂應該優先使用，一般卡不會被扣
+    const normal = (await mk({ name: '4 堂', total: 4, startDate: d, endDate: T.addDays(d, 10) })).data.id;
+    const unl = (await mk({ name: '無限堂月卡', unlimited: true, startDate: d, endDate: T.addDays(d, 20), categories: ['tkd'] })).data.id;
+    assert.ok(unl);
+    const slots = [];
+    for (let i = 1; i <= 6; i++) {
+      slots.push((await req('/api/admin/slots', { method: 'POST', auth: token, body: {
+        title: `U${i}`, category: 'tkd', date: T.addDays(d, i), time: '07:00', duration: 60, capacity: 5 } })).data.id);
+    }
+    for (const id of slots) {
+      const r = await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: id } });
+      assert.equal(r.status, 201);
+      assert.equal(r.data.pass.unlimited, true);
+      assert.equal(r.data.pass.remaining, null);
+    }
+    const ps = (await req(`/api/admin/students/${st}/passes`, { auth: token })).data.passes;
+    const u = ps.find((p) => p.id === unl), n = ps.find((p) => p.id === normal);
+    assert.equal(u.used, 6); assert.equal(u.status, 'active');
+    assert.equal(n.used, 0); // 一般卡完全沒被扣
+    // 無限堂不適用的課（kids）改扣一般卡
+    const kids = (await req('/api/admin/slots', { method: 'POST', auth: token, body: {
+      title: 'K', category: 'kids', date: T.addDays(d, 2), time: '08:00', duration: 60, capacity: 5 } })).data.id;
+    assert.equal((await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: kids } })).data.pass.name, '4 堂');
+    // 學員列表摘要
+    const me = (await req('/api/admin/students', { auth: token })).data.students.find((x) => x.id === st);
+    assert.equal(me.credits.unlimited, true);
+    assert.equal(me.credits.unlimitedUntil, T.addDays(d, 20));
+    assert.equal(me.credits.remaining, 3);
+    // 手動扣堂不受上限限制；展延照常
+    assert.equal((await req(`/api/admin/passes/${unl}/adjust`, { method: 'POST', auth: token, body: { delta: 1 } })).data.pass.used, 7);
+    assert.equal((await req(`/api/admin/passes/${unl}/extend`, { method: 'POST', auth: token, body: { endDate: T.addDays(d, 50) } })).status, 200);
+    // 一般卡改成無限堂（換方案）也可以，並記錄在異動紀錄
+    assert.equal((await req(`/api/admin/passes/${normal}`, { method: 'PUT', auth: token, body: {
+      name: '無限堂月卡', unlimited: true, startDate: d, endDate: T.addDays(d, 10) } })).status, 200);
+    const n2 = (await req(`/api/admin/students/${st}/passes`, { auth: token })).data.passes.find((p) => p.id === normal);
+    assert.equal(n2.unlimited, true);
+    assert.ok(n2.logs[0].detail.changes.some(([k, a, b]) => k === 'unlimited' && a === false && b === true));
+    // 學員端看得到
+    const my = (await req('/api/my/passes', { auth: t })).data.passes;
+    assert.ok(my.every((p) => p.unlimited && p.remaining === null));
+  });
+
   test('生日與當月壽星', async () => {
     const d = today();
     const ym = d.slice(0, 7);

@@ -205,6 +205,10 @@ const EN = {
   '原因': 'Reason', '（選填，例如受傷請假、出國）': '(optional, e.g. injury, travel)',
   '+1 週': '+1 week', '+2 週': '+2 weeks', '+1 個月': '+1 month', '+3 個月': '+3 months',
 
+  // 無限堂
+  '無限堂': 'Unlimited', '（有效期間內不限堂數）': ' (no class limit during the valid period)', '無限堂（1 個月）': 'Unlimited (1 month)',
+  '無限堂月卡': 'Unlimited monthly', '♾️ 無限堂': '♾️ Unlimited', '🎫 無限堂': '🎫 Unlimited', '（無限堂）': ' (unlimited)',
+
   // 伺服器訊息
   '找不到這堂課': 'Class not found', '這堂課已停課': 'This class has been cancelled',
   '這堂課已經開始或已截止預約': 'This class has started or booking has closed', '這堂課已額滿': 'This class is full',
@@ -344,6 +348,15 @@ const PATTERNS = [
   ['異動紀錄（{}）', (n) => `History (${n})`], ['修改「{}」（可點上方方案直接更換）', (n) => `Edit "${n}" (click a preset above to change plan)`],
   ['目前到期日：{}', (d) => `Current expiry: ${d}`], ['已展延到 {}', (d) => `Extended to ${d}`],
   ['{}（{}）', (a, b) => (/^\+\d/.test(a) ? `${tr(a)} (${b})` : null)],
+
+  ['已上 {} 堂', (n) => `${n} attended`], ['・另有 {} 堂', (n) => ` · plus ${n} credits`],
+  ['（無限堂，{} 到期）', (d) => ` (unlimited, expires ${d})`],
+  ['」（無限堂，{} 到期）', (d) => `" (unlimited, expires ${d})`],
+  ['已幫 {} 預約，使用「{}」（無限堂）', (n, p) => `Booked for ${n} using "${p}" (unlimited)`],
+  ['已幫 {} 開「{}」（無限堂）', (n, p) => `Added "${p}" (unlimited) for ${n}`],
+  ['已扣 1 堂（已上 {} 堂）', (n) => `1 class recorded (${n} attended)`], ['已補回 1 堂（已上 {} 堂）', (n) => `1 class removed (${n} attended)`],
+  ['作廢「{}」？作廢後就不能再用這張卡約課（已約的課不受影響）。', (n) => `Void "${n}"? It can't be used for new bookings (existing bookings stay).`],
+  ['{} 無限堂', (n) => `${n} Unlimited`],
 
   // 後台：固定課表
   ['{}・名額 {}', (s, n) => `${s} · capacity ${n}`], ['名額 {}', (n) => `Capacity ${n}`],

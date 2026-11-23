@@ -171,7 +171,9 @@
     try {
       const { pass, required } = await sapi(`/api/bookings/preview?slotId=${s.id}&studentId=${sid}`);
       if (pass) {
-        passBox.innerHTML = `🎫 將使用「<b>${esc(pass.name)}</b>」，預約後剩 <b>${pass.remaining - 1}</b> 堂（${fmtDate(pass.endDate)} 到期）`;
+        passBox.innerHTML = pass.unlimited
+          ? `🎫 將使用「<b>${esc(pass.name)}</b>」（無限堂，${fmtDate(pass.endDate)} 到期）`
+          : `🎫 將使用「<b>${esc(pass.name)}</b>」，預約後剩 <b>${pass.remaining - 1}</b> 堂（${fmtDate(pass.endDate)} 到期）`;
         btn.disabled = false;
       } else if (required) {
         passBox.innerHTML = many
@@ -204,7 +206,7 @@
       const r = await sapi('/api/bookings', { method: 'POST', body: { slotId: booking.id, studentId: selectedStudent(), note: f.note.value } });
       $('bookDlg').close();
       toast(`✅ ${auth.students.length > 1 ? `已幫 ${r.student.name} 預約` : '已預約'} ${fmtSlot(r.slot)}「${ctitle(r.slot)}」`
-        + (r.pass ? `，「${r.pass.name}」剩 ${r.pass.remaining} 堂` : ''));
+        + (r.pass && !r.pass.unlimited ? `，「${r.pass.name}」剩 ${r.pass.remaining} 堂` : ''));
       load();
     } catch (e) {
       if (e.status === 401) { $('bookDlg').close(); openBooking(booking); return; }

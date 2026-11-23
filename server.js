@@ -191,7 +191,8 @@ function createApp(cfg) {
     return st;
   }
   const publicPass = (p) => ({
-    id: p.id, name: p.name, total: p.total, used: p.used, remaining: Math.max(0, p.total - p.used),
+    id: p.id, name: p.name, unlimited: !!p.unlimited, total: p.total, used: p.used,
+    remaining: p.unlimited ? null : Math.max(0, p.total - p.used),    // 無限堂沒有剩餘堂數的概念
     purchaseDate: p.purchase_date, startDate: p.start_date, endDate: p.end_date, categories: p.categories ? p.categories.split(',') : [],
     note: p.note, status: passStatus(p, today()),
     bookedUsed: p.booked_used, adjust: p.adjust,   // 已用 = 系統預約扣的 + 手動調整
@@ -203,9 +204,11 @@ function createApp(cfg) {
     if (!T.isValidDate(purchaseDate)) throw new HttpError(400, '購買日格式錯誤');
     if (purchaseDate > today()) throw new HttpError(400, '購買日不能晚於今天');
     const cats = Array.isArray(b.categories) ? b.categories.filter((c) => CATEGORY_IDS.includes(c)) : [];
+    const unlimited = b.unlimited === true;
     return {
       name: str(b.name, 40, '方案名稱'),
-      total: int(b.total, 1, 500, '堂數'),
+      unlimited,
+      total: unlimited ? 0 : int(b.total, 1, 500, '堂數'),   // 無限堂不設堂數
       startDate: b.startDate, endDate: b.endDate,
       categories: [...new Set(cats)].join(','),
       note: str(b.note, 200, '備註', { required: false }),
@@ -598,9 +601,11 @@ function createApp(cfg) {
     if (!store.getStudent(Number(id))) throw new HttpError(404, '找不到這位學員');
     const input = parsePass(body);
     // 開卡時可以先填已用堂數（例如補登紙本紀錄）
-    const used = body.used === undefined || body.used === '' ? 0 : int(body.used, 0, input.total, '已使用堂數');
+    const used = body.used === undefined || body.used === '' ? 0
+      : int(body.used, 0, input.unlimited ? 9999 : input.total, '已使用堂數');
     const pid = store.createPass(Number(id), { ...input, adjust: used });
-    store.logPass(pid, 'create', { name: input.name, total: input.total, end: input.endDate, used, purchase: input.purchaseDate });
+    store.logPass(pid, 'create', { name: input.name, total: input.total, unlimited: input.unlimited, end: input.endDate, used,
+      purchase: input.purchaseDate });
     return { status: 201, body: { id: pid } };
   });
 
@@ -611,12 +616,12 @@ function createApp(cfg) {
     const input = parsePass(body);
     // 「已使用堂數」可直接修改：和系統預約扣的堂數之間的差額記成手動調整
     const used = body.used === undefined || body.used === '' ? p.used : int(body.used, 0, 500, '已使用堂數');
-    if (input.total < used) throw new HttpError(409, `已經用了 ${used} 堂，總堂數不能少於這個數字`);
+    if (!input.unlimited && input.total < used) throw new HttpError(409, `已經用了 ${used} 堂，總堂數不能少於這個數字`);
     store.updatePass(p.id, { ...input, adjust: used - p.booked_used });
     // 記下改了哪些欄位（更改方案、展延、補登等）
-    const before = { name: p.name, total: p.total, start: p.start_date, end: p.end_date, purchase: p.purchase_date,
+    const before = { name: p.name, unlimited: !!p.unlimited, total: p.total, start: p.start_date, end: p.end_date, purchase: p.purchase_date,
       categories: p.categories, used: p.used };
-    const afterV = { name: input.name, total: input.total, start: input.startDate, end: input.endDate,
+    const afterV = { name: input.name, unlimited: input.unlimited, total: input.total, start: input.startDate, end: input.endDate,
       purchase: input.purchaseDate, categories: input.categories, used };
     const changes = Object.keys(before).filter((k) => String(before[k]) !== String(afterV[k]))
       .map((k) => [k, before[k], afterV[k]]);
@@ -643,7 +648,7 @@ function createApp(cfg) {
     if (!p) throw new HttpError(404, '找不到這張堂數卡');
     const delta = int(body.delta, -100, 100, '調整堂數');
     const used = p.used + delta;
-    if (used > p.total) throw new HttpError(409, '堂數已經用完了，無法再扣');
+    if (!p.unlimited && used > p.total) throw new HttpError(409, '堂數已經用完了，無法再扣');
     if (used < 0) throw new HttpError(409, '已使用堂數不能小於 0');
     store.setPassAdjust(p.id, p.adjust + delta);
     store.logPass(p.id, 'adjust', { delta, used });

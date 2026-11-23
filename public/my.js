@@ -69,14 +69,17 @@
     box.innerHTML = shown.map((p) => {
       const days = Math.round((toMs(p.endDate + 'T00:00') - toMs(today + 'T00:00')) / 86400000);
       const live = p.status === 'active';
-      const pct = Math.round((p.used / p.total) * 100);
+      const pct = p.unlimited ? 0 : Math.round((p.used / p.total) * 100);
       return `<div class="card${live || p.status === 'future' ? '' : ' past'}" style="padding:14px 16px">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap">
           <b>${many ? `👤 ${esc(p.studentName)}・` : ''}${esc(p.name)}</b> <span class="badge ${label[p.status][0]}">${label[p.status][1]}</span>
         </div>
-        <div style="font-size:1.5rem;font-weight:800;margin-top:4px">剩 ${p.remaining} 堂
-          <span class="muted" style="font-size:.9rem;font-weight:400">／共 ${p.total} 堂</span></div>
-        <div class="bar"><i style="width:${pct}%"></i></div>
+        ${p.unlimited
+          ? `<div style="font-size:1.5rem;font-weight:800;margin-top:4px">♾️ 無限堂
+              <span class="muted" style="font-size:.9rem;font-weight:400">已上 ${p.used} 堂</span></div>`
+          : `<div style="font-size:1.5rem;font-weight:800;margin-top:4px">剩 ${p.remaining} 堂
+              <span class="muted" style="font-size:.9rem;font-weight:400">／共 ${p.total} 堂</span></div>
+            <div class="bar"><i style="width:${pct}%"></i></div>`}
         <div class="${live && days <= 7 ? '' : 'muted'}" style="font-size:.88rem;margin-top:6px">
           ${p.status === 'future' ? `${fmtDate(p.startDate)} 開始・` : ''}有效期限至 ${fmtDate(p.endDate)}<br>
           <span class="muted">購買日 ${fmtDate(p.purchaseDate)}</span>

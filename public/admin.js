@@ -309,7 +309,8 @@
       } });
       openRosters.add(adding.id);
       $('addDlg').close();
-      toast(r.pass ? `已幫 ${matches[0].name} 預約，扣「${r.pass.name}」，剩 ${r.pass.remaining} 堂`
+      toast(r.pass ? (r.pass.unlimited ? `已幫 ${matches[0].name} 預約，使用「${r.pass.name}」（無限堂）`
+        : `已幫 ${matches[0].name} 預約，扣「${r.pass.name}」，剩 ${r.pass.remaining} 堂`)
         : `已幫 ${matches[0].name} 預約（未扣堂數）`);
       loadSchedule(); loadStudents(true);
     } catch (e) { showError($('addErr'), e.message); }
@@ -337,8 +338,9 @@
   };
   const FILTERS = {
     all: () => true,
-    nocredit: (x) => x.active && x.credits.remaining === 0,
-    expiring: (x) => x.active && x.credits.remaining > 0 && (x.credits.remaining <= 1 || daysUntil(x.credits.nextExpiry) <= 7),
+    nocredit: (x) => x.active && x.credits.remaining === 0 && !x.credits.unlimited,
+    expiring: (x) => x.active && (x.credits.unlimited ? daysUntil(x.credits.unlimitedUntil) <= 7
+      : x.credits.remaining > 0 && (x.credits.remaining <= 1 || daysUntil(x.credits.nextExpiry) <= 7)),
     bday: (x) => x.active && isBdayMonth(x),
     inactive: (x) => !x.active,
     self: (x) => x.source === 'self',
@@ -353,6 +355,12 @@
 
   function creditLine(x) {
     const c = x.credits;
+    if (c.unlimited) {
+      const left = daysUntil(c.unlimitedUntil);
+      return `<span class="badge ${left <= 7 ? 'warn' : 'ok'}">🎫 無限堂</span>
+        <span class="${left <= 7 ? '' : 'muted'}">${fmtDate(c.unlimitedUntil)} 到期${left <= 7 ? `（${left === 0 ? '今天' : `還有 ${left} 天`}）` : ''}</span>
+        ${c.remaining ? `<span class="muted">・另有 ${c.remaining} 堂</span>` : ''}`;
+    }
     if (!c.remaining) {
       return `<span class="badge danger">🎫 沒有可用堂數</span>${c.future ? ` <span class="muted">（另有 ${c.future} 堂尚未開始）</span>` : ''}`;
     }
@@ -539,7 +547,15 @@
     { label: '幼兒／期班', name: '期班', total: 8, months: 1, cats: ['little'] },
     { label: '私人課 1 小時（1,200）', name: '私人課 1 小時', total: 1, months: 1, cats: ['private'] },
     { label: '私人課 5 小時（5,000）', name: '私人課 5 小時', total: 5, months: 3, cats: ['private'] },
+    { label: '無限堂（1 個月）', name: '無限堂月卡', unlimited: true, total: 1, months: 1, cats: GROUP },
   ];
+  // 勾選無限堂時，堂數欄位停用
+  const syncUnlimited = () => {
+    const f = $('passForm');
+    f.total.disabled = f.unlimited.checked;
+    f.total.closest('label').style.opacity = f.unlimited.checked ? '.45' : '';
+  };
+  $('passForm').unlimited.addEventListener('change', syncUnlimited);
   // 加 n 個月再減一天（例如 11/25 開始的月卡到 12/24）；月底自動調整
   const addMonths = (date, n) => {
     let y = Number(date.slice(0, 4)), m = Number(date.slice(5, 7)) + n;
@@ -556,7 +572,7 @@
   $('presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-preset="${i}">${esc(p.label)}</button>`).join('');
   $('presets').querySelectorAll('[data-preset]').forEach((b) => b.onclick = () => {
     const p = PRESETS[b.dataset.preset], f = $('passForm');
-    f.name.value = p.name; f.total.value = p.total;
+    f.name.value = p.name; f.total.value = p.total; f.unlimited.checked = !!p.unlimited; syncUnlimited();
     // 換方案（修改既有的卡）時保留原本的日期，例如已經展延過的到期日；新開卡才自動算到期日
     if (!editingPass) {
       if (!f.startDate.value) f.startDate.value = todayStr();
@@ -583,6 +599,7 @@
     f.endDate.value = addMonths(todayStr(), 1);
     setCats(GROUP);
     f.used.value = 0;
+    f.unlimited.checked = false; syncUnlimited();
     $('usedHint').textContent = '新卡通常是 0；補登紙本紀錄時可填已上過的堂數';
     $('passFormTitle').textContent = '新增堂數卡';
     $('passSave').textContent = '新增';
@@ -607,7 +624,9 @@
           <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
             <div style="flex:1;min-width:180px">
               <b>${esc(p.name)}</b> <span class="badge ${cls}">${label}</span>
-              <div style="font-size:1.05rem;margin-top:2px"><b>剩 ${p.remaining}</b> <span class="muted">/ 共 ${p.total} 堂（已用 ${p.used}）</span></div>
+              <div style="font-size:1.05rem;margin-top:2px">${p.unlimited
+                ? `<b>♾️ 無限堂</b> <span class="muted">已上 ${p.used} 堂</span>`
+                : `<b>剩 ${p.remaining}</b> <span class="muted">/ 共 ${p.total} 堂（已用 ${p.used}）</span>`}</div>
               ${p.adjust ? `<div class="muted" style="font-size:.82rem">系統預約扣 ${p.bookedUsed} 堂・手動調整 ${p.adjust > 0 ? '+' : ''}${p.adjust} 堂</div>` : ''}
               <div class="muted" style="font-size:.85rem">購買日 ${fmtDate(p.purchaseDate)}・有效 ${fmtDate(p.startDate)} – ${fmtDate(p.endDate)}</div>
               <div class="muted" style="font-size:.85rem">${esc(catsText(p.categories))}</div>
@@ -617,7 +636,7 @@
             </div>
             <div class="btns" style="margin:0">
               ${p.status === 'void' ? '' : `
-                <button class="btn secondary small" data-a="minus" ${p.remaining <= 0 ? 'disabled' : ''} title="例如學員沒預約直接來上課">扣 1 堂</button>
+                <button class="btn secondary small" data-a="minus" ${!p.unlimited && p.remaining <= 0 ? 'disabled' : ''} title="例如學員沒預約直接來上課">扣 1 堂</button>
                 <button class="btn secondary small" data-a="plus" ${p.used <= 0 ? 'disabled' : ''}>補回 1 堂</button>`}
               ${p.status === 'void' ? '' : '<button class="btn secondary small" data-a="extend">展延</button>'}
               <button class="btn secondary small" data-a="edit">修改／換方案</button>
@@ -630,7 +649,8 @@
         a('edit', () => {
           editingPass = p;
           const f = $('passForm');
-          f.name.value = p.name; f.total.value = p.total; f.startDate.value = p.startDate; f.endDate.value = p.endDate;
+          f.name.value = p.name; f.total.value = p.total || 1; f.startDate.value = p.startDate; f.endDate.value = p.endDate;
+          f.unlimited.checked = p.unlimited; syncUnlimited();
           f.purchaseDate.value = p.purchaseDate || p.startDate;
           f.used.value = p.used;
           $('usedHint').textContent = `系統預約自動扣了 ${p.bookedUsed} 堂；直接改這個數字可以修正（補登、現場上課未預約、扣錯補回）`;
@@ -645,7 +665,8 @@
         const adjust = async (delta) => {
           try {
             const r = await call(`/api/admin/passes/${p.id}/adjust`, { method: 'POST', body: { delta } });
-            toast(delta < 0 ? `已補回 1 堂，剩 ${r.pass.remaining} 堂` : `已扣 1 堂，剩 ${r.pass.remaining} 堂`);
+            toast(r.pass.unlimited ? `已${delta < 0 ? '補回' : '扣'} 1 堂（已上 ${r.pass.used} 堂）`
+              : delta < 0 ? `已補回 1 堂，剩 ${r.pass.remaining} 堂` : `已扣 1 堂，剩 ${r.pass.remaining} 堂`);
             after();
           } catch (e) { fail(e); }
         };
@@ -653,7 +674,8 @@
         a('minus', () => adjust(1));
         a('plus', () => adjust(-1));
         a('void', async () => {
-          if (!confirm(`作廢「${p.name}」？作廢後剩下的 ${p.remaining} 堂不能再用（已約的課不受影響）。`)) return;
+          if (!confirm(p.unlimited ? `作廢「${p.name}」？作廢後就不能再用這張卡約課（已約的課不受影響）。`
+            : `作廢「${p.name}」？作廢後剩下的 ${p.remaining} 堂不能再用（已約的課不受影響）。`)) return;
           try { await call(`/api/admin/passes/${p.id}/void`, { method: 'POST' }); toast('已作廢'); after(); } catch (e) { fail(e); }
         });
         a('restore', async () => {
@@ -670,9 +692,10 @@
 
   // ---------- 異動紀錄文字 ----------
   const FIELD = isEn
-    ? { name: 'plan', total: 'credits', start: 'start', end: 'expiry', purchase: 'purchased', categories: 'classes', used: 'used' }
-    : { name: '方案名稱', total: '堂數', start: '開始日', end: '到期日', purchase: '購買日', categories: '適用課程', used: '已用堂數' };
-  const fmtVal = (k, v) => (['start', 'end', 'purchase'].includes(k) && v ? fmtDate(v)
+    ? { name: 'plan', unlimited: 'unlimited', total: 'credits', start: 'start', end: 'expiry', purchase: 'purchased', categories: 'classes', used: 'used' }
+    : { name: '方案名稱', unlimited: '無限堂', total: '堂數', start: '開始日', end: '到期日', purchase: '購買日', categories: '適用課程', used: '已用堂數' };
+  const fmtVal = (k, v) => (k === 'unlimited' ? (v ? (isEn ? 'yes' : '是') : (isEn ? 'no' : '否'))
+    : ['start', 'end', 'purchase'].includes(k) && v ? fmtDate(v)
     : k === 'categories' ? catsText(v ? String(v).split(',') : []) : String(v));
   const logTime = (at) => {
     const ms = toMs(at.replace(' ', 'T').slice(0, 16)) + 8 * 3600e3; // 資料庫存 UTC，顯示台北時間
@@ -683,8 +706,8 @@
     const x = l.detail || {};
     switch (l.action) {
       case 'create': return isEn
-        ? `Created: ${x.name}, ${x.total} credits, expires ${fmtDate(x.end)}${x.used ? `, ${x.used} already used (backfilled)` : ''}`
-        : `開卡：${x.name} ${x.total} 堂，${fmtDate(x.end)} 到期${x.used ? `，補登已用 ${x.used} 堂` : ''}`;
+        ? `Created: ${x.name}, ${x.unlimited ? 'unlimited' : `${x.total} credits`}, expires ${fmtDate(x.end)}${x.used ? `, ${x.used} already used (backfilled)` : ''}`
+        : `開卡：${x.name} ${x.unlimited ? '無限堂' : `${x.total} 堂`}，${fmtDate(x.end)} 到期${x.used ? `，補登已用 ${x.used} 堂` : ''}`;
       case 'edit': return (isEn ? 'Changed: ' : '修改：') + x.changes.map(([k, a, b]) => `${FIELD[k] || k} ${fmtVal(k, a)} → ${fmtVal(k, b)}`).join(isEn ? '; ' : '、');
       case 'extend': return (isEn ? `Extended: ${fmtDate(x.from)} → ${fmtDate(x.to)}` : `展延：${fmtDate(x.from)} → ${fmtDate(x.to)}`)
         + (x.reason ? `（${x.reason}）` : '');
@@ -706,7 +729,7 @@
     f.endDate.value = p.endDate;
     f.endDate.min = p.startDate;
     $('extErr').classList.add('hidden');
-    $('extSummary').innerHTML = `<b>${esc(p.name)}</b>　剩 ${p.remaining} 堂<br>目前到期日：${fmtDate(p.endDate)}`;
+    $('extSummary').innerHTML = `<b>${esc(p.name)}</b>　${p.unlimited ? '無限堂' : `剩 ${p.remaining} 堂`}<br>目前到期日：${fmtDate(p.endDate)}`;
     const base = p.endDate < todayStr() ? todayStr() : p.endDate; // 已過期的卡從今天起算
     const opts = [['+1 週', addDays(base, 7)], ['+2 週', addDays(base, 14)],
       ['+1 個月', addMonths(addDays(base, 1), 1)], ['+3 個月', addMonths(addDays(base, 1), 3)]];
@@ -729,14 +752,14 @@
     ev.preventDefault();
     const f = ev.target;
     const body = {
-      name: f.name.value, total: Number(f.total.value), purchaseDate: f.purchaseDate.value,
+      name: f.name.value, total: Number(f.total.value), unlimited: f.unlimited.checked, purchaseDate: f.purchaseDate.value,
       startDate: f.startDate.value, endDate: f.endDate.value, note: f.note.value, used: Number(f.used.value || 0),
       categories: [...$('passCats').querySelectorAll('input:checked')].map((i) => i.value),
     };
     try {
       if (editingPass) await call(`/api/admin/passes/${editingPass.id}`, { method: 'PUT', body });
       else await call(`/api/admin/students/${passStudent.id}/passes`, { method: 'POST', body });
-      toast(editingPass ? '已儲存' : `已幫 ${passStudent.name} 開「${body.name.trim()}」${body.total} 堂`);
+      toast(editingPass ? '已儲存' : `已幫 ${passStudent.name} 開「${body.name.trim()}」${body.unlimited ? '（無限堂）' : `${body.total} 堂`}`);
       resetPassForm(); loadPasses(); loadStudents();
     } catch (e) { showError($('passErr'), e.message); }
   });
