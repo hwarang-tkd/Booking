@@ -212,7 +212,7 @@
       roster.innerHTML = `<table><tbody>${s.bookings.map((b) => `
         <tr class="${b.status}">
           <td class="num">${b.status === 'active' ? ++n : ''}</td>
-          <td><b>${esc(b.name)}</b> ${b.trial ? '<span class="badge warn">體驗</span>' : ''}
+          <td><b><a href="#" data-profile="${b.studentId}" title="查看學員資料">${esc(b.name)}</a></b> ${b.trial ? '<span class="badge warn">體驗</span>' : ''}
             ${b.bookedBy === 'admin' ? '<span class="badge">代約</span>' : ''}
             ${b.birthdayToday ? '<span class="badge warn" title="今天生日">🎂 生日</span>' : ''}
             ${b.consentPhoto === 'no' ? '<span class="badge danger" title="不同意攝影使用">📷✗ 不拍照</span>' : ''}
@@ -448,7 +448,8 @@
     box.innerHTML = '';
     for (const x of list) {
       const el = document.createElement('div');
-      el.className = 'card' + (x.active ? '' : ' past');
+      el.className = 'card' + (x.active ? '' : ' past') + (x.id === focusStudent ? ' focus' : '');
+      el.dataset.id = x.id;
       el.style.cssText = 'margin-bottom:8px;padding:12px 14px';
       el.innerHTML = `
         <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
@@ -508,8 +509,34 @@
       box.appendChild(el);
     }
     if (!list.length) box.innerHTML = '<div class="card empty">沒有符合的學員</div>';
+    if (focusStudent) {
+      const card = box.querySelector(`[data-id="${focusStudent}"]`);
+      focusStudent = null;
+      if (card) {
+        const go = () => card.isConnected && card.scrollIntoView({ block: 'center' });
+        go(); setTimeout(go, 400);
+        setTimeout(() => card.classList.remove('focus'), 2500);
+      }
+    }
   }
   $('stSearch').addEventListener('input', renderStudents);
+
+  // 點學員姓名 → 跳到「學員資料」並標出這位學員
+  let focusStudent = null;
+  function openProfile(id) {
+    focusStudent = id;
+    $('stSearch').value = '';
+    stFilter = 'all';
+    document.querySelectorAll('#stFilters [data-f]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === 'all')));
+    document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+    document.querySelector('[data-tab="students"]').click();
+  }
+  document.addEventListener('click', (ev) => {
+    const a = ev.target.closest('[data-profile]');
+    if (!a || !a.dataset.profile) return;
+    ev.preventDefault();
+    openProfile(Number(a.dataset.profile));
+  });
 
   function openStudent(x) {
     editingStudent = x || null;
@@ -921,7 +948,7 @@
       box.innerHTML = `<div style="font-weight:700;margin-bottom:4px">🎂 ${m} 月壽星（${r.students.length} 位）
           ${todays.length ? `<span class="badge warn" style="margin-left:4px">今天生日：${todays.map((x) => esc(x.name)).join('、')}</span>` : ''}</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.92rem">${r.students.map((x) => `
-          <span class="${x.passed && !x.isToday ? 'muted' : ''}">${x.isToday ? '🎉 ' : ''}<b>${esc(x.name)}</b>
+          <span class="${x.passed && !x.isToday ? 'muted' : ''}">${x.isToday ? '🎉 ' : ''}<b><a href="#" data-profile="${x.id}">${esc(x.name)}</a></b>
             ${m}/${Number(x.day.slice(8))}・滿 ${x.age} 歲</span>`).join('')}</div>`;
       box.classList.remove('hidden');
     } catch { box.classList.add('hidden'); }
@@ -982,7 +1009,7 @@
             <div style="flex:1;min-width:200px">
               <b>${r.start}–${r.end}</b>　${esc(RTYPE(r.type))}${r.type === 'self' ? `・${r.people} 人` : ''}
               ${cancelled ? '<span class="badge">已取消</span>' : r.passName ? '<span class="badge ok">扣時數</span>' : r.paid ? '<span class="badge ok">已付款</span>' : '<span class="badge warn">未付款</span>'}
-              <div style="font-size:.9rem">${esc(r.contactName)}${r.contactPhone ? `・<a href="tel:${esc(r.contactPhone)}">${esc(r.contactPhone)}</a>` : ''}
+              <div style="font-size:.9rem">${r.studentId ? `<a href="#" data-profile="${r.studentId}">${esc(r.contactName)}</a>` : esc(r.contactName)}${r.contactPhone ? `・<a href="tel:${esc(r.contactPhone)}">${esc(r.contactPhone)}</a>` : ''}
                 ${r.bookedBy === 'admin' ? '<span class="badge">代訂</span>' : ''}</div>
               <div class="muted" style="font-size:.85rem">${r.passName ? `🏟 ${esc(r.passName)}（扣 ${r.units} 小時）` : `${r.price.toLocaleString()} 元`}${r.note ? `・${esc(r.note)}` : ''}</div>
             </div>
@@ -1185,7 +1212,7 @@
       if (r.student) {
         const pct = a.rate === null ? 0 : a.rate;
         sb.innerHTML = `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-          <div style="flex:1;min-width:180px"><b style="font-size:1.1rem">${esc(r.student.name)}</b>
+          <div style="flex:1;min-width:180px"><b style="font-size:1.1rem"><a href="#" data-profile="${r.student.id}">${esc(r.student.name)}</a></b>
             <div class="muted" style="font-size:.85rem">${esc(r.student.email)}・${fmtDate(f.from.value)} – ${fmtDate(f.to.value)}</div></div>
           <div style="text-align:center"><div style="font-size:1.8rem;font-weight:800">${rateText}</div><div class="muted" style="font-size:.8rem">出席率</div></div>
           <div style="font-size:.9rem;line-height:1.7"><b>出席 ${a.present}・缺席 ${a.absent}</b><br>已預約 ${c.booked}・取消 ${c.cancelled}・停課 ${c.slotCancelled}</div>
@@ -1211,7 +1238,8 @@
         return `<tr class="${it.status === 'cancelled' || it.status === 'slotCancelled' ? 'cancelled' : ''}">
           <td class="c-date" data-l="${tr('日期')}"><b>${fmtDate(it.date)}</b><br><span class="muted">${it.start}–${it.end}</span></td>
           <td data-l="${tr('項目')}">${what}</td>
-          <td class="c-who" data-l="${tr('學員')}">${it.studentId ? `<a href="#" data-st="${it.studentId}">${esc(it.name)}</a>` : esc(it.name)}
+          <td class="c-who" data-l="${tr('學員')}">${it.studentId ? `<a href="#" data-profile="${it.studentId}" title="查看學員資料">${esc(it.name)}</a>
+            <button type="button" class="btn ghost small" data-st="${it.studentId}" title="只看這位學員的預約與出席率" style="min-height:0;padding:0 4px">🔍</button>` : esc(it.name)}
             <div class="muted" style="font-size:.8rem;word-break:break-all">${esc(it.phone || '')}${it.email ? `${it.phone ? '・' : ''}${esc(it.email)}` : ''}</div></td>
           <td class="c-status" data-l="${tr('狀態')}"><span class="badge ${cls}">${label}</span></td>
           <td data-l="${tr('扣堂／費用')}" style="font-size:.85rem">${credit}</td>

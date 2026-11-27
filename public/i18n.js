@@ -279,6 +279,7 @@ const EN = {
   '，仍可預約；這堂課會記為「未扣堂」，請向老師繳費或購買方案。': ' — you can still book. This class will be marked "No credit"; please pay your instructor or buy a plan.',
   '⚠️ 你目前沒有可用的': '⚠️ You currently have no ', '未扣時數': 'No hours used',
 
+  '查看學員資料': 'View student profile', '只看這位學員的預約與出席率': 'Show only this student\'s bookings and attendance',
   '不扣堂': 'No charge', '改回扣堂': 'Charge credit', '已改成不扣堂': 'Marked as no charge',
   '已改回扣堂，但沒有可用的堂數，標示為未扣堂': 'Charging restored, but no usable credits — marked "No credit"',
   '把這堂改成「不扣堂」（例如補課、贈送）？': 'Mark this class as "No charge" (e.g. make-up or free class)?',
