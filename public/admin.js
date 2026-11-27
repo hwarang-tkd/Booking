@@ -118,7 +118,8 @@
   // ---------- 分頁 ----------
   document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
-    for (const t of ['schedule', 'students', 'templates', 'extra', 'rentals', 'export']) $('tab-' + t).classList.toggle('hidden', b.dataset.tab !== t);
+    for (const t of ['schedule', 'all', 'students', 'templates', 'extra', 'rentals', 'export']) $('tab-' + t).classList.toggle('hidden', b.dataset.tab !== t);
+    if (b.dataset.tab === 'all') initAll();
     if (b.dataset.tab === 'rentals') loadRentals();
     if (b.dataset.tab === 'export') initExport();
     if (b.dataset.tab === 'schedule') loadSchedule();
@@ -1047,6 +1048,93 @@
       ${r.student ? '' : table(r.sheets[3], r.headers.perStudent, r.perStudent)}
       </body></html>`;
   }
+
+  // ---------- 所有預約 ----------
+  let allReady = false, allTimer = null;
+  const ALL_STATUS = {
+    booked: ['ok', '已預約'], attended: ['', '已上課'], cancelled: ['', '已取消'], slotCancelled: ['danger', '停課'],
+  };
+  function initAll() {
+    if (allReady) return loadAll();
+    allReady = true;
+    allRange('next30');
+    loadAll();
+  }
+  function allRange(q) {
+    const f = $('allForm'), t = todayStr(), first = `${t.slice(0, 7)}-01`;
+    const r = {
+      today: [t, t], week: [mondayOf(t), addDays(mondayOf(t), 6)], next30: [t, addDays(t, 29)],
+      month: [first, addMonths(first, 1)], 30: [addDays(t, -29), t],
+    }[q];
+    [f.from.value, f.to.value] = r;
+    document.querySelectorAll('#allQuick [data-q]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.q === q)));
+  }
+  document.querySelectorAll('#allQuick [data-q]').forEach((b) => b.addEventListener('click', () => { allRange(b.dataset.q); loadAll(); }));
+  ['from', 'to', 'kind', 'status'].forEach((n) => $('allForm')[n].addEventListener('change', () => {
+    if (n === 'from' || n === 'to') document.querySelectorAll('#allQuick [data-q]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+    loadAll();
+  }));
+  $('allForm').q.addEventListener('input', () => { clearTimeout(allTimer); allTimer = setTimeout(loadAll, 300); });
+  $('allForm').addEventListener('submit', (ev) => { ev.preventDefault(); loadAll(); });
+
+  async function loadAll() {
+    const f = $('allForm'), box = $('allList');
+    if (!f.from.value || !f.to.value) return;
+    const q = new URLSearchParams({ from: f.from.value, to: f.to.value, kind: f.kind.value, status: f.status.value, q: f.q.value.trim() });
+    box.innerHTML = '<div class="empty">載入中…</div>';
+    try {
+      const r = await call('/api/admin/all-bookings?' + q);
+      const c = r.counts;
+      $('allSum').textContent = `共 ${r.total} 筆（上課 ${c.classes}、場地 ${c.rentals}）・已預約 ${c.booked}・已上課 ${c.attended}・取消 ${c.cancelled}・停課 ${c.slotCancelled}`;
+      if (!r.items.length) { box.innerHTML = '<div class="card empty">沒有符合的預約</div>'; return; }
+      const rows = r.items.map((it) => {
+        const [cls, label] = ALL_STATUS[it.status];
+        const what = it.kind === 'class'
+          ? `<b>${esc(ctitle(it))}</b>${it.trial ? ' <span class="badge warn">體驗</span>' : ''}`
+          : `<span class="badge warn">🏟 場地</span> <b>${esc(RENT_LABEL[it.rentalType] || it.rentalType)}</b>${it.rentalType === 'self' ? `・${it.people} 人` : ''}`;
+        const credit = it.kind === 'class'
+          ? (it.passName ? `🎫 ${esc(it.passName)}` : it.trial || it.status === 'cancelled' || it.status === 'slotCancelled' ? '' : '<span class="badge danger">未扣堂</span>')
+          : (it.passName ? `🏟 ${esc(it.passName)}（${it.units} 小時）` : `${it.price.toLocaleString()} 元・${it.paid ? '已付款' : '<span class="badge warn">未付款</span>'}`);
+        const canCancel = it.status === 'booked' || (it.status === 'attended' && it.kind === 'class');
+        return `<tr class="${it.status === 'cancelled' || it.status === 'slotCancelled' ? 'cancelled' : ''}">
+          <td class="c-date" data-l="${tr('日期')}"><b>${fmtDate(it.date)}</b><br><span class="muted">${it.start}–${it.end}</span></td>
+          <td data-l="${tr('項目')}">${what}</td>
+          <td class="c-who" data-l="${tr('學員')}">${it.studentId ? `<a href="#" data-st="${it.studentId}">${esc(it.name)}</a>` : esc(it.name)}
+            <div class="muted" style="font-size:.8rem;word-break:break-all">${esc(it.phone || '')}${it.email ? `${it.phone ? '・' : ''}${esc(it.email)}` : ''}</div></td>
+          <td class="c-status" data-l="${tr('狀態')}"><span class="badge ${cls}">${label}</span></td>
+          <td data-l="${tr('扣堂／費用')}" style="font-size:.85rem">${credit}</td>
+          <td data-l="${tr('預約')}" style="font-size:.8rem" class="muted">${it.bookedBy === 'admin' ? (it.kind === 'rental' ? '老師代訂' : '老師代約') : '學員自己'}<br>${logTime(it.createdAt)}
+            ${it.note ? `<div style="color:var(--text)">📝 ${esc(it.note)}</div>` : ''}</td>
+          <td data-l="">${canCancel ? `<button class="btn ghost small" data-cancel="${it.kind}:${it.id}">取消</button>` : ''}</td>
+        </tr>`;
+      }).join('');
+      box.innerHTML = `${r.truncated ? '<p class="alert error">資料太多，只顯示前 2,000 筆，請縮小範圍或改用匯出。</p>' : ''}
+        <div class="card" style="padding:0;overflow:hidden"><table class="all-table">
+        <thead><tr><th>日期</th><th>項目</th><th>學員</th><th>狀態</th><th>扣堂／費用</th><th>預約</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table></div>`;
+      box.querySelectorAll('[data-cancel]').forEach((b) => b.onclick = async () => {
+        const [k, id] = b.dataset.cancel.split(':');
+        const row = b.closest('tr');
+        const who = row.querySelector('td.c-who a, td.c-who').textContent.trim().split('\n')[0];
+        if (!confirm(`取消 ${who} 的這筆${k === 'rental' ? '場地租借' : '預約'}？`)) return;
+        try {
+          await call(k === 'rental' ? `/api/admin/rentals/${id}/cancel` : `/api/admin/bookings/${id}/cancel`, { method: 'POST' });
+          toast('已取消'); loadAll();
+        } catch (e) { fail(e); }
+      });
+      box.querySelectorAll('[data-st]').forEach((a) => a.onclick = (ev) => {
+        ev.preventDefault();
+        const st = students.find((x) => x.id === Number(a.dataset.st));
+        if (st) openHistory(st); else loadStudents(true).then(() => { const s2 = students.find((x) => x.id === Number(a.dataset.st)); if (s2) openHistory(s2); });
+      });
+    } catch (e) { if (e.status !== 401) box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
+  }
+  const RENT_LABEL = { group: '團體課程', private: '一對一', self: '自主訓練' };
+  $('allExport').onclick = () => {
+    const f = $('allForm'), ef = $('exportForm');
+    ef.from.value = f.from.value; ef.to.value = f.to.value; ef.who.value = '';
+    $('exXlsx').click();
+  };
 
   // ---------- 固定課表 ----------
   async function loadTemplates() {

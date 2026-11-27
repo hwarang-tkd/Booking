@@ -653,6 +653,29 @@ describe('API', () => {
     assert.equal(me.credits.rental.remaining, 2.5);
   });
 
+  test('所有預約：上課＋場地，依類型、狀態、關鍵字篩選', async () => {
+    const from = T.addDays(today(), -30), to = T.addDays(today(), 60);
+    const all = (await req(`/api/admin/all-bookings?from=${from}&to=${to}`, { auth: token })).data;
+    assert.ok(all.counts.classes > 0 && all.counts.rentals > 0);
+    assert.equal(all.total, all.items.length);
+    const sorted = all.items.map((x) => `${x.date}${x.start}`);
+    assert.deepEqual(sorted, [...sorted].sort());
+    const cls = (await req(`/api/admin/all-bookings?from=${from}&to=${to}&kind=class`, { auth: token })).data;
+    assert.ok(cls.items.every((x) => x.kind === 'class'));
+    const rent = (await req(`/api/admin/all-bookings?from=${from}&to=${to}&kind=rental`, { auth: token })).data;
+    assert.ok(rent.items.every((x) => x.kind === 'rental' && x.rentalType));
+    const canc = (await req(`/api/admin/all-bookings?from=${from}&to=${to}&status=cancelled`, { auth: token })).data;
+    assert.ok(canc.items.length > 0 && canc.items.every((x) => x.status === 'cancelled'));
+    const act = (await req(`/api/admin/all-bookings?from=${from}&to=${to}&status=active`, { auth: token })).data;
+    assert.ok(act.items.every((x) => ['booked', 'attended'].includes(x.status)));
+    const kw = (await req(`/api/admin/all-bookings?from=${from}&to=${to}&q=${encodeURIComponent('外部教練')}`, { auth: token })).data;
+    assert.ok(kw.items.length > 0 && kw.items.every((x) => x.name === '外部教練'));
+    const byEmail = (await req(`/api/admin/all-bookings?from=${from}&to=${to}&q=HUA2@example.com`, { auth: token })).data;
+    assert.ok(byEmail.items.every((x) => x.email === 'hua2@example.com'));
+    assert.equal((await req(`/api/admin/all-bookings?from=${to}&to=${from}`, { auth: token })).status, 400);
+    assert.equal((await req(`/api/admin/all-bookings?from=${from}&to=${to}`)).status, 401);
+  });
+
   test('報表匯出：依期間、依學員，JSON 與 Excel', async () => {
     const from = T.addDays(today(), -30), to = T.addDays(today(), 60);
     const r = await req(`/api/admin/report?from=${from}&to=${to}`, { auth: token });

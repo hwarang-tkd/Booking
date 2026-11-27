@@ -265,6 +265,15 @@ const EN = {
   '課表': 'Schedule', '收費': 'Rates', '預約課程 →': 'Book a class →', '收費方式請見': 'For prices, see ',
   '親愛的會員們，來上課前記得先': 'Members, please remember to ',
 
+  // 所有預約
+  '所有預約': 'All bookings', '狀態': 'Status', '上課預約': 'Class bookings', '有效（不含取消）': 'Active (not cancelled)',
+  '已預約（未上）': 'Booked (upcoming)', '已上課／已使用': 'Attended / used', '搜尋': 'Search',
+  '學員姓名、信箱、電話或課程名稱': 'Student name, email, phone or class', '匯出這個範圍 Excel': 'Export this range to Excel',
+  '沒有符合的預約': 'No matching bookings', '項目': 'Item', '扣堂／費用': 'Credit / fee', '老師代訂': 'Booked by instructor',
+  '老師代約': 'Booked by instructor', '學員自己': 'Student', '已取消': 'Cancelled', '🏟 場地': '🏟 Venue',
+  '資料太多，只顯示前 2,000 筆，請縮小範圍或改用匯出。': 'Too many results — showing the first 2,000. Narrow the range or use export.',
+  '一次最多查詢 400 天': 'At most 400 days at a time',
+
   // 伺服器訊息
   '找不到這堂課': 'Class not found', '這堂課已停課': 'This class has been cancelled',
   '這堂課已經開始或已截止預約': 'This class has started or booking has closed', '這堂課已額滿': 'This class is full',
@@ -470,6 +479,10 @@ const PATTERNS = [
   ['{} 元／小時', (n) => (/^[\d,]+$/.test(n) ? `NT$${n} / hour` : null)],
   ['{} 元／10 小時', (n) => (/^[\d,]+$/.test(n) ? `NT$${n} / 10 hours` : null)],
   ['（同一時段最多 6 人）', () => '(up to 6 people at a time)'],
+
+  ['共 {} 筆（上課 {}、場地 {}）・已預約 {}・已上課 {}・取消 {}・停課 {}',
+    (n, c, r, b, a, x, y) => `${n} total (${c} classes, ${r} rentals) · ${b} booked · ${a} attended · ${x} cancelled · ${y} class cancelled`],
+  ['取消 {} 的這筆場地租借？', (n) => `Cancel this rental for ${n}?`], ['取消 {} 的這筆預約？', (n) => `Cancel this booking for ${n}?`],
 
   // 後台：固定課表
   ['{}・名額 {}', (s, n) => `${s} · capacity ${n}`], ['名額 {}', (n) => `Capacity ${n}`],

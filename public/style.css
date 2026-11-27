@@ -332,3 +332,25 @@ footer.site {
   .nav a { flex: 1 1 auto; white-space: nowrap; padding: 6px 4px; font-size: .86rem; }
   .nav a.user { max-width: 30%; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* ---------- 所有預約 ---------- */
+.all-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.all-table th { text-align: left; background: var(--surface-2); padding: 8px 10px; font-size: .82rem; white-space: nowrap; }
+.all-table td { padding: 8px 10px; border-top: 1px solid var(--border); vertical-align: top; }
+.all-table tr.cancelled td { opacity: .55; }
+.all-table tr.cancelled td:first-child b { text-decoration: line-through; }
+@media (max-width: 720px) {
+  .all-table thead { display: none; }
+  .all-table, .all-table tbody, .all-table tr, .all-table td { display: block; width: 100%; }
+  .all-table tr { border-top: 1px solid var(--border); padding: 8px 4px; }
+  .all-table td { border: none; padding: 3px 10px; }
+  .all-table td[data-l]:not([data-l=""])::before { content: attr(data-l) "："; color: var(--muted); font-size: .8rem; }
+  .all-table td.c-date::before { display: none; }
+}
+
+/* 後台分頁：一行排不下時左右滑動，不要把字擠成直排 */
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: none; white-space: nowrap; }
+.all-table td.c-date, .all-table td.c-status { white-space: nowrap; }
+.all-table .badge { white-space: nowrap; }

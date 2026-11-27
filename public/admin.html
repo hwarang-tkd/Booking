@@ -38,6 +38,7 @@
       <div id="bdayBanner" class="card hidden" style="margin-bottom:14px;padding:12px 14px"></div>
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected="true" data-tab="schedule">課表與名單</button>
+        <button role="tab" aria-selected="false" data-tab="all">所有預約</button>
         <button role="tab" aria-selected="false" data-tab="students">學員資料</button>
         <button role="tab" aria-selected="false" data-tab="templates">固定課表</button>
         <button role="tab" aria-selected="false" data-tab="extra">加開課程</button>
@@ -54,6 +55,37 @@
           <span class="range" id="range"></span>
         </div>
         <div id="schedule" aria-live="polite"></div>
+      </div>
+
+      <!-- 所有預約 -->
+      <div id="tab-all" class="hidden">
+        <form id="allForm" class="card stack" style="padding:12px 14px">
+          <div class="filters" id="allQuick" style="flex-wrap:wrap;overflow:visible;padding:0">
+            <button type="button" data-q="today">今天</button>
+            <button type="button" data-q="week">本週</button>
+            <button type="button" data-q="next30">未來 30 天</button>
+            <button type="button" data-q="month">本月</button>
+            <button type="button" data-q="30">最近 30 天</button>
+          </div>
+          <div class="row">
+            <label class="field">開始日期 <input type="date" name="from" required></label>
+            <label class="field">結束日期 <span class="hint">（含當天）</span><input type="date" name="to" required></label>
+          </div>
+          <div class="row">
+            <label class="field">類型
+              <select name="kind"><option value="all">全部</option><option value="class">上課預約</option><option value="rental">場地租借</option></select></label>
+            <label class="field">狀態
+              <select name="status"><option value="all">全部</option><option value="active">有效（不含取消）</option>
+                <option value="booked">已預約（未上）</option><option value="attended">已上課／已使用</option>
+                <option value="cancelled">已取消</option><option value="slotCancelled">停課</option></select></label>
+          </div>
+          <label class="field">搜尋 <input type="search" name="q" placeholder="學員姓名、信箱、電話或課程名稱"></label>
+        </form>
+        <div class="toolbar" style="margin-top:10px">
+          <span class="range" id="allSum" style="margin:0 auto 0 0"></span>
+          <button class="btn secondary small" id="allExport">匯出這個範圍 Excel</button>
+        </div>
+        <div id="allList" aria-live="polite"></div>
       </div>
 
       <!-- 學員資料 -->

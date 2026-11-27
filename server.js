@@ -759,6 +759,56 @@ function createApp(cfg) {
     return { lang, t, from, to, student, summary, bookings: bookings.map((b) => b.row), rentals: rentals.map((r) => r.row), perStudent };
   }
 
+  // 所有預約：上課預約＋場地租借，可依期間、類型、狀態、關鍵字篩選
+  route('GET', /^\/api\/admin\/all-bookings$/, (req, url) => {
+    requireAdmin(req);
+    const from = url.searchParams.get('from'), to = url.searchParams.get('to');
+    if (!T.isValidDate(from) || !T.isValidDate(to)) throw new HttpError(400, '請選擇正確的開始與結束日期');
+    if (to < from) throw new HttpError(400, '結束日期不能早於開始日期');
+    if (T.minutesBetween(`${from}T00:00`, `${to}T00:00`) > 400 * 1440) throw new HttpError(400, '一次最多查詢 400 天');
+    const kind = url.searchParams.get('kind') || 'all';        // all / class / rental
+    const status = url.searchParams.get('status') || 'all';    // all / active / booked / attended / cancelled / slotCancelled
+    const kw = (url.searchParams.get('q') || '').trim().toLowerCase();
+    const end = T.addDays(to, 1), nowT = now();
+    const items = [];
+    if (kind !== 'rental') {
+      for (const b of store.reportBookings(from, end, null)) {
+        const st = b.status === 'cancelled' ? 'cancelled' : b.slot_cancelled ? 'slotCancelled' : b.start_at <= nowT ? 'attended' : 'booked';
+        items.push({
+          kind: 'class', id: b.id, date: b.start_at.slice(0, 10), start: b.start_at.slice(11),
+          end: T.fromMs(T.toMs(b.start_at) + b.duration_min * 60000).slice(11),
+          title: b.title, titleEn: b.title_en, category: b.category, studentId: b.student_id, name: b.name, email: b.email,
+          phone: b.phone, status: st, passName: b.pass_name, passUnlimited: !!b.pass_unlimited, trial: !!b.trial,
+          bookedBy: b.booked_by, note: b.note, createdAt: b.created_at, cancelledAt: b.cancelled_at,
+        });
+      }
+    }
+    if (kind !== 'class') {
+      for (const r of store.reportRentals(from, end, null)) {
+        const st = r.status === 'cancelled' ? 'cancelled' : `${r.date}T${r.start}` <= nowT ? 'attended' : 'booked';
+        items.push({
+          kind: 'rental', id: r.id, date: r.date, start: r.start, end: r.end, rentalType: r.type, people: r.people,
+          studentId: r.student_id, name: r.contact_name, email: r.student_email || '', phone: r.contact_phone,
+          status: st, passName: r.pass_name, units: r.units, price: r.price, paid: !!r.paid,
+          bookedBy: r.booked_by, note: r.note, createdAt: r.created_at, cancelledAt: r.cancelled_at,
+        });
+      }
+    }
+    const wanted = (it) => status === 'all' || (status === 'active' ? ['booked', 'attended'].includes(it.status) : it.status === status);
+    const typeName = (it) => (it.kind === 'rental' ? R.RENTAL_TYPES[it.rentalType].name : `${it.title} ${it.titleEn || ''}`);
+    const match = (it) => !kw || [it.name, it.email, it.phone, typeName(it), it.passName, it.note]
+      .some((v) => String(v || '').toLowerCase().includes(kw));
+    const list = items.filter((it) => wanted(it) && match(it))
+      .sort((x, y) => `${x.date}${x.start}`.localeCompare(`${y.date}${y.start}`) || String(x.name).localeCompare(String(y.name)));
+    const count = (st) => list.filter((x) => x.status === st).length;
+    return {
+      total: list.length,
+      counts: { booked: count('booked'), attended: count('attended'), cancelled: count('cancelled'), slotCancelled: count('slotCancelled'),
+        classes: list.filter((x) => x.kind === 'class').length, rentals: list.filter((x) => x.kind === 'rental').length },
+      items: list.slice(0, 2000), truncated: list.length > 2000,
+    };
+  });
+
   route('GET', /^\/api\/admin\/report$/, (req, url) => {
     requireAdmin(req);
     const r = buildReport(url);
