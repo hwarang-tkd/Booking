@@ -223,7 +223,9 @@
           <td>${b.phone ? `<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>` : ''}
             <div class="muted" style="font-size:.8rem;word-break:break-all">${esc(b.email)}</div></td>
           <td>${b.status === 'active'
-            ? `<button class="btn ghost small" data-cancel="${b.id}">取消</button>`
+            ? `${past && !s.cancelled ? (b.attendance === 'absent'
+                ? `<span class="badge danger">缺席</span> <button class="btn ghost small" data-att="${b.id}:">改為出席</button>`
+                : `<button class="btn ghost small" data-att="${b.id}:absent">缺席</button>`) : ''}<button class="btn ghost small" data-cancel="${b.id}">取消</button>`
             : '<span class="badge">已取消</span>'}</td>
         </tr>`).join('')}</tbody></table>`;
     }
@@ -251,6 +253,10 @@
       if (!confirm(msg)) return;
       try { await call(`/api/admin/slots/${s.id}`, { method: 'DELETE' }); toast('已刪除課程'); loadSchedule(); }
       catch (e) { fail(e); }
+    });
+    roster.querySelectorAll('[data-att]').forEach((b) => b.onclick = async () => {
+      const [id, value] = b.dataset.att.split(':');
+      try { await call(`/api/admin/bookings/${id}/attendance`, { method: 'POST', body: { value } }); loadSchedule(); } catch (e) { fail(e); }
     });
     roster.querySelectorAll('[data-cancel]').forEach((b) => b.onclick = async () => {
       const name = b.closest('tr').querySelector('b').textContent;
@@ -535,7 +541,7 @@
           <td><span class="tag" style="${catStyle(b.category)}">&nbsp;</span></td>
           <td>${fmtDate(b.startAt.slice(0, 10))} ${b.startAt.slice(11)}<br><b>${esc(ctitle(b))}</b></td>
           <td>${b.status === 'cancelled' ? '<span class="badge">已取消</span>' : b.slotCancelled ? '<span class="badge danger">停課</span>'
-            : b.past ? '<span class="badge">已上課</span>' : '<span class="badge ok">已預約</span>'}
+            : b.past ? (b.absent ? '<span class="badge danger">缺席</span>' : '<span class="badge">已上課</span>') : '<span class="badge ok">已預約</span>'}
             ${b.trial ? '<span class="badge warn">體驗</span>' : ''}
             ${b.status === 'active' && !b.slotCancelled ? (b.passName ? `<div class="muted" style="font-size:.8rem">🎫 ${esc(b.passName)}</div>`
               : b.trial ? '' : '<span class="badge danger">未扣堂</span>') : ''}</td>
@@ -691,6 +697,8 @@
               <div class="muted" style="font-size:.85rem">購買日 ${fmtDate(p.purchaseDate)}・有效 ${fmtDate(p.startDate)} – ${fmtDate(p.endDate)}</div>
               <div class="muted" style="font-size:.85rem">${esc(catsText(p.categories, p.kind))}</div>
               ${p.note ? `<div style="font-size:.85rem">📝 ${esc(p.note)}</div>` : ''}
+              <details class="usage-box" style="margin-top:4px;font-size:.85rem"><summary style="cursor:pointer;font-weight:600">📋 使用紀錄（已用 ${p.used} ${u}）</summary>
+                <div class="usage-body" style="margin-top:6px">載入中…</div></details>
               ${p.logs && p.logs.length ? `<details style="margin-top:4px;font-size:.82rem"><summary class="muted" style="cursor:pointer">異動紀錄（${p.logs.length}）</summary>
                 <ul style="margin:4px 0 0;padding-left:1.2em">${p.logs.map((l) => `<li><span class="muted">${logTime(l.at)}</span> ${esc(logText(l))}</li>`).join('')}</ul></details>` : ''}
             </div>
@@ -706,6 +714,13 @@
             </div>
           </div>`;
         const a = (n, fn) => { const b = el.querySelector(`[data-a="${n}"]`); if (b) b.onclick = fn; };
+        el.querySelector('.usage-box').addEventListener('toggle', async (ev) => {
+          if (!ev.target.open || ev.target.dataset.loaded) return;
+          ev.target.dataset.loaded = '1';
+          const body = ev.target.querySelector('.usage-body');
+          try { body.innerHTML = usageHtml(await call(`/api/admin/passes/${p.id}/usage`)); }
+          catch (e) { body.textContent = e.message; }
+        });
         a('edit', () => {
           editingPass = p;
           const f = $('passForm');
@@ -1052,9 +1067,11 @@
   // ---------- 所有預約 ----------
   let allReady = false, allTimer = null;
   const ALL_STATUS = {
-    booked: ['ok', '已預約'], attended: ['', '已上課'], cancelled: ['', '已取消'], slotCancelled: ['danger', '停課'],
+    booked: ['ok', '已預約'], attended: ['', '已上課'], absent: ['danger', '缺席'], cancelled: ['', '已取消'], slotCancelled: ['danger', '停課'],
   };
-  function initAll() {
+  async function initAll() {
+    if (!students.length) await loadStudents(true);
+    $('allWho').innerHTML = students.map((x) => `<option value="${esc(`${x.name} <${x.email}>`)}"></option>`).join('');
     if (allReady) return loadAll();
     allReady = true;
     allRange('next30');
@@ -1070,6 +1087,9 @@
     document.querySelectorAll('#allQuick [data-q]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.q === q)));
   }
   document.querySelectorAll('#allQuick [data-q]').forEach((b) => b.addEventListener('click', () => { allRange(b.dataset.q); loadAll(); }));
+  $('allForm').who.addEventListener('change', loadAll);
+  $('allForm').who.addEventListener('input', () => { if (!$('allForm').who.value) loadAll(); });
+  $('allForm').noPass.addEventListener('change', loadAll);
   ['from', 'to', 'kind', 'status'].forEach((n) => $('allForm')[n].addEventListener('change', () => {
     if (n === 'from' || n === 'to') document.querySelectorAll('#allQuick [data-q]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
     loadAll();
@@ -1081,11 +1101,31 @@
     const f = $('allForm'), box = $('allList');
     if (!f.from.value || !f.to.value) return;
     const q = new URLSearchParams({ from: f.from.value, to: f.to.value, kind: f.kind.value, status: f.status.value, q: f.q.value.trim() });
+    if (f.noPass.checked) q.set('noPass', '1');
+    const pick = f.who.value.trim() ? findStudentByLabel(f.who.value) : null;
+    if (f.who.value.trim() && !pick) { $('allStudent').classList.add('hidden'); return; }   // 還在輸入，等選好
+    if (pick) q.set('studentId', pick.id);
     box.innerHTML = '<div class="empty">載入中…</div>';
     try {
       const r = await call('/api/admin/all-bookings?' + q);
       const c = r.counts;
-      $('allSum').textContent = `共 ${r.total} 筆（上課 ${c.classes}、場地 ${c.rentals}）・已預約 ${c.booked}・已上課 ${c.attended}・取消 ${c.cancelled}・停課 ${c.slotCancelled}`;
+      const a = r.attendance;
+      const rateText = a.rate === null ? '—' : `${a.rate}%`;
+      $('allSum').textContent = `共 ${r.total} 筆（上課 ${c.classes}、場地 ${c.rentals}）・已預約 ${c.booked}・已上課 ${c.attended}・缺席 ${c.absent}・取消 ${c.cancelled}・停課 ${c.slotCancelled}・未扣堂 ${c.noPass}・出席率 ${rateText}`;
+      // 指定學員時顯示出席統計
+      const sb = $('allStudent');
+      if (r.student) {
+        const pct = a.rate === null ? 0 : a.rate;
+        sb.innerHTML = `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+          <div style="flex:1;min-width:180px"><b style="font-size:1.1rem">${esc(r.student.name)}</b>
+            <div class="muted" style="font-size:.85rem">${esc(r.student.email)}・${fmtDate(f.from.value)} – ${fmtDate(f.to.value)}</div></div>
+          <div style="text-align:center"><div style="font-size:1.8rem;font-weight:800">${rateText}</div><div class="muted" style="font-size:.8rem">出席率</div></div>
+          <div style="font-size:.9rem;line-height:1.7"><b>出席 ${a.present}・缺席 ${a.absent}</b><br>已預約 ${c.booked}・取消 ${c.cancelled}・停課 ${c.slotCancelled}</div>
+        </div>
+        <div class="bar" style="margin-top:10px"><i style="width:${pct}%"></i></div>
+        <p class="muted" style="font-size:.8rem;margin:6px 0 0">出席率 = 出席 ÷（出席 + 缺席）。沒有標記缺席的課都算出席；取消、停課、還沒上的課不算。</p>`;
+        sb.classList.remove('hidden');
+      } else sb.classList.add('hidden');
       if (!r.items.length) { box.innerHTML = '<div class="card empty">沒有符合的預約</div>'; return; }
       const rows = r.items.map((it) => {
         const [cls, label] = ALL_STATUS[it.status];
@@ -1094,8 +1134,12 @@
           : `<span class="badge warn">🏟 場地</span> <b>${esc(RENT_LABEL[it.rentalType] || it.rentalType)}</b>${it.rentalType === 'self' ? `・${it.people} 人` : ''}`;
         const credit = it.kind === 'class'
           ? (it.passName ? `🎫 ${esc(it.passName)}` : it.trial || it.status === 'cancelled' || it.status === 'slotCancelled' ? '' : '<span class="badge danger">未扣堂</span>')
-          : (it.passName ? `🏟 ${esc(it.passName)}（${it.units} 小時）` : `${it.price.toLocaleString()} 元・${it.paid ? '已付款' : '<span class="badge warn">未付款</span>'}`);
-        const canCancel = it.status === 'booked' || (it.status === 'attended' && it.kind === 'class');
+          : (it.passName ? `🏟 ${esc(it.passName)}（${it.units} 小時）`
+            : `${it.noPass ? '<span class="badge danger">未扣時數</span> ' : ''}${it.price.toLocaleString()} 元・${it.paid ? '已付款' : '<span class="badge warn">未付款</span>'}`);
+        const canCancel = it.status === 'booked' || (['attended', 'absent'].includes(it.status) && it.kind === 'class');
+        // 已開始的課可以點名
+        const att = it.kind === 'class' && (it.status === 'attended' || it.status === 'absent')
+          ? `<button class="btn ghost small" data-att="${it.id}:${it.status === 'absent' ? '' : 'absent'}">${it.status === 'absent' ? '改為出席' : '缺席'}</button>` : '';
         return `<tr class="${it.status === 'cancelled' || it.status === 'slotCancelled' ? 'cancelled' : ''}">
           <td class="c-date" data-l="${tr('日期')}"><b>${fmtDate(it.date)}</b><br><span class="muted">${it.start}–${it.end}</span></td>
           <td data-l="${tr('項目')}">${what}</td>
@@ -1105,7 +1149,7 @@
           <td data-l="${tr('扣堂／費用')}" style="font-size:.85rem">${credit}</td>
           <td data-l="${tr('預約')}" style="font-size:.8rem" class="muted">${it.bookedBy === 'admin' ? (it.kind === 'rental' ? '老師代訂' : '老師代約') : '學員自己'}<br>${logTime(it.createdAt)}
             ${it.note ? `<div style="color:var(--text)">📝 ${esc(it.note)}</div>` : ''}</td>
-          <td data-l="">${canCancel ? `<button class="btn ghost small" data-cancel="${it.kind}:${it.id}">取消</button>` : ''}</td>
+          <td data-l="" style="white-space:nowrap">${att}${canCancel ? `<button class="btn ghost small" data-cancel="${it.kind}:${it.id}">取消</button>` : ''}</td>
         </tr>`;
       }).join('');
       box.innerHTML = `${r.truncated ? '<p class="alert error">資料太多，只顯示前 2,000 筆，請縮小範圍或改用匯出。</p>' : ''}
@@ -1122,17 +1166,25 @@
           toast('已取消'); loadAll();
         } catch (e) { fail(e); }
       });
-      box.querySelectorAll('[data-st]').forEach((a) => a.onclick = (ev) => {
+      box.querySelectorAll('[data-att]').forEach((b) => b.onclick = async () => {
+        const [id, value] = b.dataset.att.split(':');
+        try { await call(`/api/admin/bookings/${id}/attendance`, { method: 'POST', body: { value } }); loadAll(); } catch (e) { fail(e); }
+      });
+      // 點學員姓名 → 只看這位學員（顯示出席率）
+      box.querySelectorAll('[data-st]').forEach((el) => el.onclick = (ev) => {
         ev.preventDefault();
-        const st = students.find((x) => x.id === Number(a.dataset.st));
-        if (st) openHistory(st); else loadStudents(true).then(() => { const s2 = students.find((x) => x.id === Number(a.dataset.st)); if (s2) openHistory(s2); });
+        const st = students.find((x) => x.id === Number(el.dataset.st));
+        if (!st) return;
+        $('allForm').who.value = `${st.name} <${st.email}>`;
+        loadAll();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       });
     } catch (e) { if (e.status !== 401) box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
   }
   const RENT_LABEL = { group: '團體課程', private: '一對一', self: '自主訓練' };
   $('allExport').onclick = () => {
     const f = $('allForm'), ef = $('exportForm');
-    ef.from.value = f.from.value; ef.to.value = f.to.value; ef.who.value = '';
+    ef.from.value = f.from.value; ef.to.value = f.to.value; ef.who.value = f.who.value.trim() && findStudentByLabel(f.who.value) ? f.who.value : '';
     $('exXlsx').click();
   };
 

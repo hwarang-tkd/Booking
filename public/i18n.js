@@ -274,6 +274,20 @@ const EN = {
   '資料太多，只顯示前 2,000 筆，請縮小範圍或改用匯出。': 'Too many results — showing the first 2,000. Narrow the range or use export.',
   '一次最多查詢 400 天': 'At most 400 days at a time',
 
+  // 沒有堂數也能約
+  '⚠️ 你目前': '⚠️ You currently have ', '沒有可用的堂數': 'no available credits',
+  '，仍可預約；這堂課會記為「未扣堂」，請向老師繳費或購買方案。': ' — you can still book. This class will be marked "No credit"; please pay your instructor or buy a plan.',
+  '⚠️ 你目前沒有可用的': '⚠️ You currently have no ', '未扣時數': 'No hours used',
+
+  // 點名、出席率、使用紀錄
+  '缺席': 'Absent', '出席': 'Present', '改為出席': 'Mark present', '出席率': 'Attendance', '（選填，從清單選擇）': '(optional — pick from the list)',
+  '只看「未扣堂／未扣時數」（沒有用到堂數或時數，可能需要收費）': 'Only "no credit / no hours used" (may need payment)',
+  '出席率 = 出席 ÷（出席 + 缺席）。沒有標記缺席的課都算出席；取消、停課、還沒上的課不算。':
+    'Attendance = present ÷ (present + absent). Classes not marked absent count as present; cancelled and upcoming classes don\'t count.',
+  '📋 使用紀錄': '📋 Usage', '還沒有使用紀錄': 'No usage yet', '開卡時補登': 'Backfilled at creation', '手動扣': 'Used manually',
+  '手動補回': 'Returned manually', '已退回': 'refunded',
+  '已取消的預約不能點名': 'Cancelled bookings can\'t be marked', '找不到這筆預約': 'Booking not found',
+
   // 伺服器訊息
   '找不到這堂課': 'Class not found', '這堂課已停課': 'This class has been cancelled',
   '這堂課已經開始或已截止預約': 'This class has started or booking has closed', '這堂課已額滿': 'This class is full',
@@ -483,6 +497,16 @@ const PATTERNS = [
   ['共 {} 筆（上課 {}、場地 {}）・已預約 {}・已上課 {}・取消 {}・停課 {}',
     (n, c, r, b, a, x, y) => `${n} total (${c} classes, ${r} rentals) · ${b} booked · ${a} attended · ${x} cancelled · ${y} class cancelled`],
   ['取消 {} 的這筆場地租借？', (n) => `Cancel this rental for ${n}?`], ['取消 {} 的這筆預約？', (n) => `Cancel this booking for ${n}?`],
+
+  ['，仍可預約；這次租借會記為「未扣時數」，費用 {} 元請向老師繳費。', (p) => ` — you can still book. This rental will be marked "No hours used"; please pay NT$${p} to your instructor.`],
+
+  ['共 {} 筆（上課 {}、場地 {}）・已預約 {}・已上課 {}・缺席 {}・取消 {}・停課 {}・未扣堂 {}・出席率 {}',
+    (n, c, r, b, a, ab, x, y, np, rt) => `${n} total (${c} classes, ${r} rentals) · ${b} booked · ${a} attended · ${ab} absent · ${x} cancelled · ${y} class cancelled · ${np} no credit · attendance ${rt}`],
+  ['出席 {}・缺席 {}・出席率 {}', (p, a, r) => `${p} present · ${a} absent · attendance ${r}`],
+  ['出席 {}・缺席 {}', (p, a) => `${p} present · ${a} absent`],
+  ['已預約 {}・取消 {}・停課 {}', (b, c, s) => `${b} booked · ${c} cancelled · ${s} class cancelled`],
+  ['📋 使用紀錄（已用 {} {}）', (n, u) => `📋 Usage (${n} ${u === '小時' ? 'h' : ''} used)`],
+  ['{}・已退回', (x) => `${x} · refunded`], ['−{} 堂', (n) => `−${n}`], ['−{} 小時', (n) => `−${n} h`], ['+{} 堂', (n) => `+${n}`], ['+{} 小時', (n) => `+${n} h`],
 
   // 後台：固定課表
   ['{}・名額 {}', (s, n) => `${s} · capacity ${n}`], ['名額 {}', (n) => `Capacity ${n}`],

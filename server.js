@@ -47,12 +47,12 @@ function loadConfig(env = process.env) {
     rentalOpen: env.RENTAL_OPEN || '09:00',      // 場地開放租借的時間
     rentalClose: env.RENTAL_CLOSE || '22:00',
     rentalMaxHours: num(env.RENTAL_MAX_HOURS, 10),
-    requireRentalPass: env.REQUIRE_RENTAL_PASS !== '0', // 學員自己租場地時需要場地租借時數
+    requireRentalPass: env.REQUIRE_RENTAL_PASS === '1', // 設為 1：沒有場地租借時數就不能租（預設可以租，後台標示未扣時數）
     rentalCutoffHours: num(env.RENTAL_CUTOFF_HOURS, 2), // 場地需在開始前幾小時完成預約
     publicUrl: (env.PUBLIC_URL || '').replace(/\/+$/, ''),  // 例如 https://booking.hwarang-tkd-tw.com（寄信連結用）
     resendApiKey: env.RESEND_API_KEY || '',
     mailFrom: env.MAIL_FROM || '',                            // 例如 花郎武道館 <no-reply@hwarang-tkd-tw.com>
-    requirePass: env.REQUIRE_PASS !== '0', // 學員自己約課時需要有可用堂數
+    requirePass: env.REQUIRE_PASS === '1', // 設為 1：學員沒有堂數就不能自己約課（預設可以約，後台標示未扣堂）
   };
 }
 
@@ -669,27 +669,42 @@ function createApp(cfg) {
       dow: ['日', '一', '二', '三', '四', '五', '六'], all: '全部學員',
       booking: ['日期', '星期', '時間', '課程', '學員', '信箱', '電話', '狀態', '使用堂數卡', '體驗課', '預約方式', '備註'],
       rental: ['日期', '星期', '時間', '時數', '類型', '租借人', '電話', '人數', '金額', '付款', '使用時數卡', '扣除時數', '狀態', '預約方式', '備註'],
-      perStudent: ['學員', '信箱', '已上課', '已預約（未上）', '學員取消', '停課', '未扣堂', '場地租借筆數', '場地租借金額'],
-      st: { attended: '已上課', booked: '已預約', cancelled: '學員取消', slotCancelled: '停課', rentCancelled: '已取消', used: '已使用' },
+      perStudent: ['學員', '信箱', '已上課', '缺席', '出席率', '已預約（未上）', '學員取消', '停課', '未扣堂', '場地租借筆數', '場地租借金額'],
+      st: { attended: '已上課', absent: '缺席', booked: '已預約', cancelled: '學員取消', slotCancelled: '停課', rentCancelled: '已取消', used: '已使用' },
       yes: '是', paid: '已付款', unpaid: '未付款', unlimited: '（無限堂）', noPass: '未扣堂', byAdmin: '老師代約', bySelf: '學員自己',
       byAdminRent: '老師代訂',
       sheets: ['摘要', '約課', '場地租借', '學員統計'],
-      sum: ['期間', '學員', '約課（不含取消）', '已上課', '已預約（未上）', '學員取消', '停課', '未扣堂（可能需收費）',
+      sum: ['期間', '學員', '約課（不含取消）', '已上課', '已預約（未上）', '學員取消', '停課', '未扣堂（可能需收費）', '缺席', '出席率',
         '場地租借（不含取消）', '場地租借金額', '已收款', '未收款'],
     },
     en: {
       dow: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], all: 'All students',
       booking: ['Date', 'Day', 'Time', 'Class', 'Student', 'Email', 'Phone', 'Status', 'Credit card', 'Trial', 'Booked by', 'Note'],
       rental: ['Date', 'Day', 'Time', 'Hours', 'Type', 'Renter', 'Phone', 'People', 'Amount', 'Payment', 'Hours card', 'Hours used', 'Status', 'Booked by', 'Note'],
-      perStudent: ['Student', 'Email', 'Attended', 'Upcoming', 'Cancelled', 'Class cancelled', 'No credit', 'Rentals', 'Rental amount'],
-      st: { attended: 'Attended', booked: 'Booked', cancelled: 'Cancelled', slotCancelled: 'Class cancelled', rentCancelled: 'Cancelled', used: 'Used' },
+      perStudent: ['Student', 'Email', 'Attended', 'Absent', 'Attendance', 'Upcoming', 'Cancelled', 'Class cancelled', 'No credit', 'Rentals', 'Rental amount'],
+      st: { attended: 'Attended', absent: 'Absent', booked: 'Booked', cancelled: 'Cancelled', slotCancelled: 'Class cancelled', rentCancelled: 'Cancelled', used: 'Used' },
       yes: 'Yes', paid: 'Paid', unpaid: 'Unpaid', unlimited: ' (unlimited)', noPass: 'No credit', byAdmin: 'Instructor', bySelf: 'Student',
       byAdminRent: 'Instructor',
       sheets: ['Summary', 'Bookings', 'Rentals', 'By student'],
       sum: ['Period', 'Student', 'Bookings (excl. cancelled)', 'Attended', 'Upcoming', 'Cancelled by student', 'Class cancelled',
-        'No credit used (may need payment)', 'Rentals (excl. cancelled)', 'Rental amount', 'Paid', 'Unpaid'],
+        'No credit used (may need payment)', 'Absent', 'Attendance rate', 'Rentals (excl. cancelled)', 'Rental amount', 'Paid', 'Unpaid'],
     },
   };
+
+  /** 上課預約的狀態：cancelled 學員取消、slotCancelled 停課、booked 未上、attended 出席、absent 缺席。 */
+  function classStatus(b, nowT) {
+    if (b.status === 'cancelled') return 'cancelled';
+    if (b.slot_cancelled) return 'slotCancelled';
+    if (b.start_at > nowT) return 'booked';
+    return b.attendance === 'absent' ? 'absent' : 'attended';
+  }
+  const rateText = (a) => (a.rate === null ? '-' : `${a.rate}%`);
+  /** 出席率 = 出席 ÷（出席 + 缺席）；取消、停課、還沒上的不算。 */
+  function attendanceOf(classItems) {
+    const present = classItems.filter((x) => x.status === 'attended').length;
+    const absent = classItems.filter((x) => x.status === 'absent').length;
+    return { present, absent, rate: present + absent ? Math.round((present / (present + absent)) * 1000) / 10 : null };
+  }
 
   /** 依期間（含結束日）與學員整理報表資料。 */
   function buildReport(url) {
@@ -706,8 +721,7 @@ function createApp(cfg) {
     const typeName = (k) => (lang === 'en' ? R.RENTAL_TYPES[k].nameEn : R.RENTAL_TYPES[k].name);
 
     const bookings = store.reportBookings(from, end, sid).map((b) => {
-      const status = b.status === 'cancelled' ? 'cancelled' : b.slot_cancelled ? 'slotCancelled'
-        : b.start_at <= nowT ? 'attended' : 'booked';
+      const status = classStatus(b, nowT);
       const endT = T.fromMs(T.toMs(b.start_at) + b.duration_min * 60000).slice(11);
       return {
         studentId: b.student_id, status, noPass: status !== 'cancelled' && status !== 'slotCancelled' && !b.pass_name && !b.trial,
@@ -738,24 +752,26 @@ function createApp(cfg) {
       [t.sum[2], live.length], [t.sum[3], count(bookings, 'attended')], [t.sum[4], count(bookings, 'booked')],
       [t.sum[5], count(bookings, 'cancelled')], [t.sum[6], count(bookings, 'slotCancelled')],
       [t.sum[7], bookings.filter((b) => b.noPass).length],
-      [t.sum[8], liveR.length], [t.sum[9], sumR(liveR)], [t.sum[10], sumR(liveR.filter((r) => r.paid))],
-      [t.sum[11], sumR(liveR.filter((r) => !r.paid))],
+      [t.sum[8], count(bookings, 'absent')], [t.sum[9], rateText(attendanceOf(bookings))],
+      [t.sum[10], liveR.length], [t.sum[11], sumR(liveR)], [t.sum[12], sumR(liveR.filter((r) => r.paid))],
+      [t.sum[13], sumR(liveR.filter((r) => !r.paid))],
     ];
     // 學員統計（沒有指定學員時）
     const per = new Map();
     for (const b of bookings) {
       const k = b.studentId;
-      const o = per.get(k) || per.set(k, { name: b.row[4], email: b.row[5], attended: 0, booked: 0, cancelled: 0, slotCancelled: 0, noPass: 0, rentals: 0, amount: 0 }).get(k);
+      const o = per.get(k) || per.set(k, { name: b.row[4], email: b.row[5], attended: 0, absent: 0, booked: 0, cancelled: 0, slotCancelled: 0, noPass: 0, rentals: 0, amount: 0 }).get(k);
       o[b.status] += 1;
       if (b.noPass) o.noPass += 1;
     }
     for (const r of liveR) {
       if (!r.studentId) continue;
-      const o = per.get(r.studentId) || per.set(r.studentId, { name: r.row[5], email: r.email, attended: 0, booked: 0, cancelled: 0, slotCancelled: 0, noPass: 0, rentals: 0, amount: 0 }).get(r.studentId);
+      const o = per.get(r.studentId) || per.set(r.studentId, { name: r.row[5], email: r.email, attended: 0, absent: 0, booked: 0, cancelled: 0, slotCancelled: 0, noPass: 0, rentals: 0, amount: 0 }).get(r.studentId);
       o.rentals += 1; o.amount += r.price;
     }
     const perStudent = [...per.values()].sort((a, b) => a.name.localeCompare(b.name))
-      .map((o) => [o.name, o.email, o.attended, o.booked, o.cancelled, o.slotCancelled, o.noPass, o.rentals, o.amount]);
+      .map((o) => [o.name, o.email, o.attended, o.absent, rateText(attendanceOf([...Array(o.attended).fill({ status: 'attended' }),
+        ...Array(o.absent).fill({ status: 'absent' })])), o.booked, o.cancelled, o.slotCancelled, o.noPass, o.rentals, o.amount]);
     return { lang, t, from, to, student, summary, bookings: bookings.map((b) => b.row), rentals: rentals.map((r) => r.row), perStudent };
   }
 
@@ -769,41 +785,50 @@ function createApp(cfg) {
     const kind = url.searchParams.get('kind') || 'all';        // all / class / rental
     const status = url.searchParams.get('status') || 'all';    // all / active / booked / attended / cancelled / slotCancelled
     const kw = (url.searchParams.get('q') || '').trim().toLowerCase();
+    const sid = url.searchParams.get('studentId') ? Number(url.searchParams.get('studentId')) : null;
+    const student = sid ? store.getStudent(sid) : null;
+    if (sid && !student) throw new HttpError(404, '找不到這位學員');
+    const noPassOnly = url.searchParams.get('noPass') === '1';
     const end = T.addDays(to, 1), nowT = now();
     const items = [];
     if (kind !== 'rental') {
-      for (const b of store.reportBookings(from, end, null)) {
-        const st = b.status === 'cancelled' ? 'cancelled' : b.slot_cancelled ? 'slotCancelled' : b.start_at <= nowT ? 'attended' : 'booked';
+      for (const b of store.reportBookings(from, end, sid)) {
+        const st = classStatus(b, nowT);
         items.push({
           kind: 'class', id: b.id, date: b.start_at.slice(0, 10), start: b.start_at.slice(11),
           end: T.fromMs(T.toMs(b.start_at) + b.duration_min * 60000).slice(11),
           title: b.title, titleEn: b.title_en, category: b.category, studentId: b.student_id, name: b.name, email: b.email,
           phone: b.phone, status: st, passName: b.pass_name, passUnlimited: !!b.pass_unlimited, trial: !!b.trial,
+          noPass: !['cancelled', 'slotCancelled'].includes(st) && !b.pass_name && !b.trial,
           bookedBy: b.booked_by, note: b.note, createdAt: b.created_at, cancelledAt: b.cancelled_at,
         });
       }
     }
     if (kind !== 'class') {
-      for (const r of store.reportRentals(from, end, null)) {
+      for (const r of store.reportRentals(from, end, sid)) {
         const st = r.status === 'cancelled' ? 'cancelled' : `${r.date}T${r.start}` <= nowT ? 'attended' : 'booked';
         items.push({
           kind: 'rental', id: r.id, date: r.date, start: r.start, end: r.end, rentalType: r.type, people: r.people,
           studentId: r.student_id, name: r.contact_name, email: r.student_email || '', phone: r.contact_phone,
           status: st, passName: r.pass_name, units: r.units, price: r.price, paid: !!r.paid,
+          noPass: st !== 'cancelled' && !r.pass_name && !!r.student_id,
           bookedBy: r.booked_by, note: r.note, createdAt: r.created_at, cancelledAt: r.cancelled_at,
         });
       }
     }
-    const wanted = (it) => status === 'all' || (status === 'active' ? ['booked', 'attended'].includes(it.status) : it.status === status);
+    const wanted = (it) => (status === 'all' || (status === 'active' ? ['booked', 'attended', 'absent'].includes(it.status) : it.status === status))
+      && (!noPassOnly || it.noPass);
     const typeName = (it) => (it.kind === 'rental' ? R.RENTAL_TYPES[it.rentalType].name : `${it.title} ${it.titleEn || ''}`);
     const match = (it) => !kw || [it.name, it.email, it.phone, typeName(it), it.passName, it.note]
       .some((v) => String(v || '').toLowerCase().includes(kw));
     const list = items.filter((it) => wanted(it) && match(it))
       .sort((x, y) => `${x.date}${x.start}`.localeCompare(`${y.date}${y.start}`) || String(x.name).localeCompare(String(y.name)));
     const count = (st) => list.filter((x) => x.status === st).length;
+    const att = attendanceOf(list.filter((x) => x.kind === 'class'));
     return {
-      total: list.length,
-      counts: { booked: count('booked'), attended: count('attended'), cancelled: count('cancelled'), slotCancelled: count('slotCancelled'),
+      total: list.length, student: student && publicStudent(student), attendance: att,
+      counts: { booked: count('booked'), attended: count('attended'), absent: count('absent'), cancelled: count('cancelled'),
+        slotCancelled: count('slotCancelled'), noPass: list.filter((x) => x.noPass).length,
         classes: list.filter((x) => x.kind === 'class').length, rentals: list.filter((x) => x.kind === 'rental').length },
       items: list.slice(0, 2000), truncated: list.length > 2000,
     };
@@ -827,7 +852,7 @@ function createApp(cfg) {
       { name: r.t.sheets[1], rows: [r.t.booking, ...r.bookings], widths: [12, 6, 13, 22, 12, 26, 13, 10, 18, 8, 10, 24] },
       { name: r.t.sheets[2], rows: [r.t.rental, ...r.rentals], widths: [12, 6, 13, 7, 12, 14, 13, 7, 9, 9, 18, 9, 9, 10, 24] },
     ];
-    if (!r.student) sheets.push({ name: r.t.sheets[3], rows: [r.t.perStudent, ...r.perStudent], widths: [14, 26, 9, 12, 10, 10, 9, 12, 12] });
+    if (!r.student) sheets.push({ name: r.t.sheets[3], rows: [r.t.perStudent, ...r.perStudent], widths: [14, 26, 9, 8, 9, 12, 10, 10, 9, 12, 12] });
     const who = r.student ? `_${r.student.name}` : '';
     return { file: buildXlsx(sheets), filename: `${cfg.schoolName}_${r.from}_${r.to}${who}.xlsx`,
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
@@ -1050,7 +1075,7 @@ function createApp(cfg) {
     return {
       bookings: store.studentBookings(st.id, '0000').reverse().map((b) => ({
         id: b.id, status: b.status, trial: !!b.trial, passName: b.pass_name, title: b.title, category: b.category, startAt: b.start_at,
-        durationMin: b.duration_min, slotCancelled: !!b.slot_cancelled, past: b.start_at <= now(),
+        durationMin: b.duration_min, slotCancelled: !!b.slot_cancelled, past: b.start_at <= now(), absent: b.attendance === 'absent',
       })),
     };
   });
@@ -1106,6 +1131,51 @@ function createApp(cfg) {
     if (slot.template_id != null) throw new HttpError(409, '固定課表的課程請改用「停課」');
     store.deleteSlot(slot.id);
     return { ok: true };
+  });
+
+  // 點名：absent 缺席、'' 出席（預設）
+  route('POST', /^\/api\/admin\/bookings\/(\d+)\/attendance$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const v = body.value === 'absent' ? 'absent' : '';
+    const b = store.getBooking(Number(id));
+    if (!b) throw new HttpError(404, '找不到這筆預約');
+    if (b.status !== 'active') throw new HttpError(409, '已取消的預約不能點名');
+    store.setAttendance(b.id, v);
+    return { ok: true };
+  });
+
+  // 堂數卡／場租時數卡的使用紀錄
+  function passUsage(p) {
+    const nowT = now();
+    const u = store.passUsage(p.id);
+    const bookings = u.bookings.map((b) => ({
+      kind: 'class', id: b.id, date: b.start_at.slice(0, 10), start: b.start_at.slice(11),
+      end: T.fromMs(T.toMs(b.start_at) + b.duration_min * 60000).slice(11), title: b.title, titleEn: b.title_en,
+      name: b.name, status: classStatus(b, nowT), counted: b.status === 'active' && !b.slot_cancelled, units: 1,
+    }));
+    const rentals = u.rentals.map((r) => ({
+      kind: 'rental', id: r.id, date: r.date, start: r.start, end: r.end, rentalType: r.type, people: r.people, name: r.contact_name,
+      status: r.status === 'cancelled' ? 'cancelled' : `${r.date}T${r.start}` <= nowT ? 'attended' : 'booked',
+      counted: r.status === 'active', units: r.units,
+    }));
+    const items = [...bookings, ...rentals].sort((a, b) => `${b.date}${b.start}`.localeCompare(`${a.date}${a.start}`));
+    const adjustments = store.passLogs(p.id).filter((l) => l.action === 'adjust' || (l.action === 'create' && l.detail.used))
+      .map((l) => ({ at: l.at, delta: l.action === 'adjust' ? l.detail.delta : l.detail.used, action: l.action }));
+    return { pass: publicPass(p), items, adjustments, attendance: attendanceOf(bookings) };
+  }
+  route('GET', /^\/api\/admin\/passes\/(\d+)\/usage$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const p = store.getPass(Number(id));
+    if (!p) throw new HttpError(404, '找不到這張堂數卡');
+    return passUsage(p);
+  });
+  route('GET', /^\/api\/my\/passes\/(\d+)\/usage$/, (req, url, body, [, id]) => {
+    const family = currentFamily(req);
+    const p = store.getPass(Number(id));
+    if (!p || !family.some((x) => x.id === p.student_id)) throw new HttpError(404, '找不到這張堂數卡');
+    const out = passUsage(p);
+    delete out.adjustments;   // 學員端只看上課／租借紀錄
+    return out;
   });
 
   route('POST', /^\/api\/admin\/bookings\/(\d+)\/cancel$/, (req, url, body, [, id]) => {

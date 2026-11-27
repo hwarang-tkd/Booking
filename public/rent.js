@@ -142,7 +142,7 @@
         box.innerHTML = `⚠️ 你沒有足夠的<b>場地租借時數</b>（這次需要 ${r.units} 小時）。請聯絡老師購買或續約。`;
         passOk = false;
       } else {
-        box.textContent = '這次租借不會扣時數。';
+        box.innerHTML = `⚠️ 你目前沒有可用的<b>場地租借時數</b>，仍可預約；這次租借會記為「未扣時數」，費用 ${price(type, Number(f.hours.value) * 60, type === 'self' ? Number(f.people.value) : 1).toLocaleString()} 元請向老師繳費。`;
         passOk = true;
       }
     } catch (e) {

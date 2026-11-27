@@ -87,6 +87,8 @@
           <span class="muted">購買日 ${fmtDate(p.purchaseDate)}</span>
           ${live ? (days <= 7 ? `<b style="color:var(--warn)">（還有 ${days} 天，記得用完喔）</b>` : `（還有 ${days} 天）`) : ''}
         </div>
+        <details class="usage-box" data-pass="${p.id}" style="margin-top:8px;font-size:.88rem">
+          <summary style="cursor:pointer;font-weight:600">📋 使用紀錄</summary><div class="usage-body" style="margin-top:6px">載入中…</div></details>
         ${p.categories.length ? `<div class="muted" style="font-size:.82rem">適用：${p.categories.map((c) => (p.kind === 'rental'
           ? ({ group: '團體課程', private: '一對一', self: '自主訓練' }[c] || c) : catName(c))).join('、')}</div>` : ''}
       </div>`;
@@ -94,6 +96,16 @@
       .filter((st) => !passes.some((p) => p.studentId === st.id && p.status === 'active'))
       .map((st) => `<div class="card muted" style="padding:12px 16px">👤 ${esc(st.name)}：目前沒有可用的堂數</div>`).join('') : '');
   }
+
+  // 使用紀錄：展開時才載入
+  document.addEventListener('toggle', async (ev) => {
+    const d = ev.target;
+    if (!(d instanceof HTMLDetailsElement) || !d.classList.contains('usage-box') || !d.open || d.dataset.loaded) return;
+    d.dataset.loaded = '1';
+    const body = d.querySelector('.usage-body');
+    try { body.innerHTML = usageHtml(await sapi(`/api/my/passes/${d.dataset.pass}/usage`)); }
+    catch (e) { body.textContent = e.message; }
+  }, true);
 
   function card(b) {
     const el = document.createElement('div');

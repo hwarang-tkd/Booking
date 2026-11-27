@@ -354,3 +354,8 @@ footer.site {
 .tabs button { flex: none; white-space: nowrap; }
 .all-table td.c-date, .all-table td.c-status { white-space: nowrap; }
 .all-table .badge { white-space: nowrap; }
+
+/* 使用紀錄 */
+.usage { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.usage td { padding: 5px 6px; border-top: 1px solid var(--border); vertical-align: top; }
+.usage tr.cancelled td { opacity: .55; }

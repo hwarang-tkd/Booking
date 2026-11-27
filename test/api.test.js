@@ -62,7 +62,7 @@ describe('API', () => {
     }
     return r;
   }
-  before(async () => { ({ req, server, base } = await start({ seedSchedule: false })); });
+  before(async () => { ({ req, server, base } = await start({ seedSchedule: false, requirePass: true, requireRentalPass: true })); });
   after(() => server.close());
 
   test('後台需要登入', async () => {
@@ -877,6 +877,90 @@ test('場地需在開始前 2 小時完成預約', async () => {
       contactName: 'B', type: 'self', date: soon.slice(0, 10), start: soon.slice(11), hours: 1 } })).status, 201);
   }
   app.server.close();
+});
+
+describe('預設：沒有堂數／時數也能約，後台標示；點名與出席率；使用紀錄', () => {
+  let req, server, admin, t, st, passId;
+  const d = () => T.addDays(today(), 2);
+  before(async () => {
+    ({ req, server } = await start({ seedSchedule: false }));
+    admin = (await req('/api/admin/login', { method: 'POST', body: { password: 'secret' } })).data.token;
+    st = (await req('/api/admin/students', { method: 'POST', auth: admin, body: { name: '點名生', email: 'att@example.com' } })).data.id;
+    const link = (await req(`/api/admin/students/${st}/reset-link`, { method: 'POST', auth: admin })).data.url;
+    t = (await req('/api/password/reset', { method: 'POST', body: { token: new URL(link).searchParams.get('token'), password: 'pass1234' } })).data.token;
+  });
+  after(() => server.close());
+  const mkSlot = async (date, time) => (await req('/api/admin/slots', { method: 'POST', auth: admin, body: {
+    title: '課', category: 'tkd', date, time, duration: 60, capacity: 5 } })).data.id;
+
+  test('沒有堂數也能約課，後台標示未扣堂；沒有時數也能租場地', async () => {
+    const s1 = await mkSlot(d(), '10:00');
+    const r = await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: s1 } });
+    assert.equal(r.status, 201);
+    assert.equal(r.data.pass, null);
+    const pv = await req(`/api/bookings/preview?slotId=${s1}`, { auth: t });
+    assert.equal(pv.data.required, false);
+    const rent = await req('/api/rentals', { method: 'POST', auth: t, body: { type: 'self', date: d(), start: '13:00', hours: 1 } });
+    assert.equal(rent.status, 201);
+    assert.equal(rent.data.pass, null);
+    const all = (await req(`/api/admin/all-bookings?from=${today()}&to=${T.addDays(today(), 10)}&noPass=1`, { auth: admin })).data;
+    assert.equal(all.counts.noPass, 2);
+    assert.ok(all.items.every((x) => x.noPass));
+  });
+
+  test('點名缺席、出席率、依學員篩選', async () => {
+    // 建立三堂過去的課並代約（代約不受時間限制）
+    const past = T.addDays(today(), -3);
+    const ids = [];
+    for (const tm of ['09:00', '11:00', '15:00']) {
+      const s = await mkSlot(past, tm);
+      ids.push((await req(`/api/admin/slots/${s}/bookings`, { method: 'POST', auth: admin, body: { studentId: st } })).data.id);
+    }
+    assert.equal((await req(`/api/admin/bookings/${ids[1]}/attendance`, { method: 'POST', auth: admin, body: { value: 'absent' } })).status, 200);
+    const all = (await req(`/api/admin/all-bookings?from=${T.addDays(today(), -10)}&to=${T.addDays(today(), 10)}&studentId=${st}`, { auth: admin })).data;
+    assert.equal(all.student.name, '點名生');
+    assert.deepEqual(all.attendance, { present: 2, absent: 1, rate: 66.7 });
+    assert.equal(all.items.filter((x) => x.status === 'absent').length, 1);
+    const absentOnly = (await req(`/api/admin/all-bookings?from=${T.addDays(today(), -10)}&to=${today()}&status=absent`, { auth: admin })).data;
+    assert.equal(absentOnly.total, 1);
+    // 改回出席
+    await req(`/api/admin/bookings/${ids[1]}/attendance`, { method: 'POST', auth: admin, body: { value: '' } });
+    const again = (await req(`/api/admin/all-bookings?from=${T.addDays(today(), -10)}&to=${today()}&studentId=${st}`, { auth: admin })).data;
+    assert.equal(again.attendance.rate, 100);
+    await req(`/api/admin/bookings/${ids[1]}/attendance`, { method: 'POST', auth: admin, body: { value: 'absent' } });
+    // 報表也有缺席、出席率
+    const rep = (await req(`/api/admin/report?from=${T.addDays(today(), -10)}&to=${today()}&studentId=${st}`, { auth: admin })).data;
+    assert.equal(rep.summary.find(([k]) => k === '缺席')[1], 1);
+    assert.equal(rep.summary.find(([k]) => k === '出席率')[1], '66.7%');
+    // 別的學員篩選不到
+    assert.equal((await req(`/api/admin/all-bookings?from=${past}&to=${today()}&studentId=999999`, { auth: admin })).status, 404);
+  });
+
+  test('堂數卡使用紀錄（後台與學員）', async () => {
+    passId = (await req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: admin, body: {
+      name: '4 堂', total: 4, startDate: T.addDays(today(), -5), endDate: T.addDays(today(), 20) } })).data.id;
+    const s1 = await mkSlot(T.addDays(today(), 4), '10:00'), s2 = await mkSlot(T.addDays(today(), 5), '10:00');
+    await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: s1 } });
+    const b2 = (await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: s2 } })).data;
+    assert.equal(b2.pass.name, '4 堂');
+    // 取消一堂 → 紀錄仍在，但不算使用
+    const mine = (await req('/api/my/bookings', { auth: t })).data.bookings.find((x) => x.startAt.startsWith(T.addDays(today(), 5)));
+    await req(`/api/my/bookings/${mine.id}/cancel`, { method: 'POST', auth: t });
+    await req(`/api/admin/passes/${passId}/adjust`, { method: 'POST', auth: admin, body: { delta: 1 } });
+    const u = (await req(`/api/admin/passes/${passId}/usage`, { auth: admin })).data;
+    assert.equal(u.pass.used, 2);                       // 1 堂預約 + 手動 1 堂
+    assert.equal(u.items.length, 2);
+    assert.equal(u.items.filter((x) => x.counted).length, 1);
+    assert.equal(u.items.find((x) => !x.counted).status, 'cancelled');
+    assert.equal(u.adjustments.length, 1);
+    const my = (await req(`/api/my/passes/${passId}/usage`, { auth: t })).data;
+    assert.equal(my.items.length, 2);
+    assert.equal(my.adjustments, undefined);
+    const other = (await req('/api/admin/students', { method: 'POST', auth: admin, body: { name: '別人', email: 'other2@example.com' } })).data.id;
+    const link = (await req(`/api/admin/students/${other}/reset-link`, { method: 'POST', auth: admin })).data.url;
+    const ot = (await req('/api/password/reset', { method: 'POST', body: { token: new URL(link).searchParams.get('token'), password: 'pass1234' } })).data.token;
+    assert.equal((await req(`/api/my/passes/${passId}/usage`, { auth: ot })).status, 404);
+  });
 });
 
 test('舊版資料庫（預約代碼）可以升級', () => {

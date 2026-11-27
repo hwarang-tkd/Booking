@@ -211,3 +211,25 @@ function renderUserNav() {
   nav.appendChild(a);
 }
 document.addEventListener('DOMContentLoaded', renderUserNav);
+
+// ---------- 堂數卡使用紀錄（後台與學員共用） ----------
+const RENT_NAMES = { group: '團體課程', private: '一對一', self: '自主訓練' };
+function usageHtml(u, { showName = false } = {}) {
+  const unit = u.pass.kind === 'rental' ? '小時' : '堂';
+  const rows = u.items.map((it) => {
+    const what = it.kind === 'class' ? esc(ctitle(it)) : `🏟 ${esc(RENT_NAMES[it.rentalType] || it.rentalType)}${it.rentalType === 'self' ? `・${it.people} 人` : ''}`;
+    const st = !it.counted ? `<span class="badge">${it.status === 'slotCancelled' ? '停課' : '已取消'}・已退回</span>`
+      : it.status === 'absent' ? '<span class="badge danger">缺席</span>'
+      : it.status === 'attended' ? '<span class="badge">已上課</span>' : '<span class="badge ok">已預約</span>';
+    return `<tr class="${it.counted ? '' : 'cancelled'}"><td style="white-space:nowrap">${fmtDate(it.date)}<br><span class="muted">${it.start}–${it.end}</span></td>
+      <td>${what}${showName ? `<div class="muted" style="font-size:.8rem">${esc(it.name)}</div>` : ''}</td>
+      <td style="white-space:nowrap">${it.counted ? `−${it.units} ${unit}` : ''}</td><td>${st}</td></tr>`;
+  });
+  const adj = (u.adjustments || []).map((a) => `<tr><td style="white-space:nowrap">${a.at.slice(5, 10).replace('-', '/')}</td>
+    <td>${a.action === 'create' ? '開卡時補登' : a.delta > 0 ? '手動扣' : '手動補回'}</td>
+    <td style="white-space:nowrap">${a.delta > 0 ? '−' : '+'}${Math.abs(a.delta)} ${unit}</td><td></td></tr>`);
+  const a = u.attendance;
+  const head = u.pass.kind === 'rental' ? '' : `<p style="margin:0 0 6px;font-size:.85rem;font-weight:600">出席 ${a.present}・缺席 ${a.absent}${a.rate === null ? '' : `・出席率 ${a.rate}%`}</p>`;
+  if (!rows.length && !adj.length) return '<p class="muted" style="margin:4px 0">還沒有使用紀錄</p>';
+  return `${head}<table class="usage"><tbody>${rows.join('')}${adj.join('')}</tbody></table>`;
+}

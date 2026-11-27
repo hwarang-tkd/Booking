@@ -77,10 +77,18 @@
             <label class="field">狀態
               <select name="status"><option value="all">全部</option><option value="active">有效（不含取消）</option>
                 <option value="booked">已預約（未上）</option><option value="attended">已上課／已使用</option>
+                <option value="absent">缺席</option>
                 <option value="cancelled">已取消</option><option value="slotCancelled">停課</option></select></label>
           </div>
-          <label class="field">搜尋 <input type="search" name="q" placeholder="學員姓名、信箱、電話或課程名稱"></label>
+          <div class="row">
+            <label class="field">學員 <span class="hint">（選填，從清單選擇）</span>
+              <input type="search" name="who" list="allWho" autocomplete="off" placeholder="輸入姓名或信箱，從清單選擇"></label>
+            <label class="field">搜尋 <input type="search" name="q" placeholder="學員姓名、信箱、電話或課程名稱"></label>
+          </div>
+          <datalist id="allWho"></datalist>
+          <label class="check"><input type="checkbox" name="noPass"><span>只看「未扣堂／未扣時數」（沒有用到堂數或時數，可能需要收費）</span></label>
         </form>
+        <div id="allStudent" class="card hidden" style="margin-top:10px;padding:12px 14px"></div>
         <div class="toolbar" style="margin-top:10px">
           <span class="range" id="allSum" style="margin:0 auto 0 0"></span>
           <button class="btn secondary small" id="allExport">匯出這個範圍 Excel</button>
