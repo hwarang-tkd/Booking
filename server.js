@@ -17,7 +17,7 @@ if (require.main === module && fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PAGES = {
   '/': '/index.html', '/my': '/my.html', '/info': '/info.html', '/admin': '/admin.html',
-  '/register': '/register.html', '/forgot': '/forgot.html', '/reset': '/reset.html', '/rent': '/rent.html',
+  '/register': '/register.html', '/forgot': '/forgot.html', '/reset': '/reset.html', '/rent': '/rent.html', '/rates': '/rates.html',
 };
 const CONSENT_VERSION = '2026-11';
 const MIME = {

@@ -261,6 +261,10 @@ const EN = {
     'Not enough venue rental hours (used up, expired, or your plan doesn\'t cover this rental type). Please contact your instructor.',
   '調整時數需以 0.5 為單位': 'Adjustments must be in steps of 0.5 hours',
 
+  // 收費頁
+  '課表': 'Schedule', '收費': 'Rates', '預約課程 →': 'Book a class →', '收費方式請見': 'For prices, see ',
+  '親愛的會員們，來上課前記得先': 'Members, please remember to ',
+
   // 伺服器訊息
   '找不到這堂課': 'Class not found', '這堂課已停課': 'This class has been cancelled',
   '這堂課已經開始或已截止預約': 'This class has started or booking has closed', '這堂課已額滿': 'This class is full',
@@ -462,6 +466,10 @@ const PATTERNS = [
   ['已幫 {} 開「{}」{} 小時', (s, p, n) => `Added "${p}" (${n} h) for ${s}`], ['已幫 {} 開「{}」（無限）', (s, p) => `Added "${p}" (unlimited) for ${s}`],
   ['時數需為 {}–{}，以 0.5 為單位', (a, b) => `Hours must be ${a}–${b} in steps of 0.5`],
   ['已使用時數需為 {}–{}，以 0.5 為單位', (a, b) => `Hours used must be ${a}–${b} in steps of 0.5`],
+
+  ['{} 元／小時', (n) => (/^[\d,]+$/.test(n) ? `NT$${n} / hour` : null)],
+  ['{} 元／10 小時', (n) => (/^[\d,]+$/.test(n) ? `NT$${n} / 10 hours` : null)],
+  ['（同一時段最多 6 人）', () => '(up to 6 people at a time)'],
 
   // 後台：固定課表
   ['{}・名額 {}', (s, n) => `${s} · capacity ${n}`], ['名額 {}', (n) => `Capacity ${n}`],

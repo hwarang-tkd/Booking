@@ -321,3 +321,14 @@ footer.site {
 .tl.off { background: var(--surface-2); cursor: not-allowed; opacity: .6; }
 .tl.sel { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
 .tl.sel span { color: inherit; }
+
+/* 收費表：左邊方案、右邊價格 */
+.price.rate-list td { text-align: left; }
+.price.rate-list td:last-child { text-align: right; white-space: nowrap; width: 1%; }
+.price.rate-list tr:nth-child(even) td { background: var(--surface-2); }
+
+/* 手機選單：5 個項目不換行 */
+@media (max-width: 480px) {
+  .nav a { flex: 1 1 auto; white-space: nowrap; padding: 6px 4px; font-size: .86rem; }
+  .nav a.user { max-width: 30%; overflow: hidden; text-overflow: ellipsis; }
+}

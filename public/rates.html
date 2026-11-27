@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>收費</title>
+  <link rel="icon" href="/logo.png" type="image/png">
+  <meta name="theme-color" content="#d4959a">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/"><img src="/logo.png" alt=""><span data-school>花郎武道館</span></a>
+      <nav class="nav" data-student>
+        <a href="/">預約課程</a>
+        <a href="/rent">場地租借</a>
+        <a href="/info">課表</a>
+        <a href="/rates" aria-current="page">收費</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>收費 Rate</h1>
+    <p class="callout">親愛的會員，請務必於您該期課程的第一堂課前完成款項支付。</p>
+
+    <h2>兒童與成人團體班 Group Classes</h2>
+    <div class="card">
+      <table class="price rate-list">
+        <tbody>
+          <tr><td>體驗課</td><td><b>200 元</b></td></tr>
+          <tr><td>一個月內 4 堂</td><td><b>2,000 元</b></td></tr>
+          <tr><td>一個月內 8 堂</td><td><b>2,600 元</b></td></tr>
+          <tr><td>一個月內 12 堂</td><td><b>3,200 元</b></td></tr>
+          <tr><td>單堂</td><td><b>600 元</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>幼兒班／跆拳道期班</h2>
+    <div class="card">平均單堂 <b>400 元</b>，每月總堂數規定有所不同，請私訊 <span id="fb">FB 粉絲專頁</span>。</div>
+
+    <h2>私人課 Private Session</h2>
+    <div class="card">
+      <table class="price rate-list">
+        <tbody>
+          <tr><td>1 小時</td><td><b>1,200 元</b></td></tr>
+          <tr><td>5 小時</td><td><b>5,000 元</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>場地租借 Venue Rental</h2>
+    <div class="card">
+      <table class="price rate-list">
+        <tbody>
+          <tr><td>團體課程</td><td><b>600 元／小時</b><br><b>5,000 元／10 小時</b></td></tr>
+          <tr><td>一對一<br><small class="muted">（同一時段最多三組）</small></td><td><b>200 元／小時</b></td></tr>
+          <tr><td>自主訓練<br><small class="muted">（同一時段最多 6 人）</small></td><td><b>100 元／小時</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:.9rem">課表中空白的時段皆可供出租。一對一同一時段最多三組、自主訓練最多 6 人，需在開始前 2 小時預約。</p>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:20px">
+      <a class="btn" href="/">預約課程 →</a>
+      <a class="btn secondary" href="/rent">線上租借場地 →</a>
+    </div>
+  </main>
+
+  <footer class="site"></footer>
+
+  <script src="/i18n.js"></script>
+  <script src="/common.js"></script>
+  <script>
+    (async () => {
+      try {
+        const cfg = await applyConfig();
+        if (cfg.facebookUrl) {
+          document.getElementById('fb').innerHTML = `<a href="${esc(cfg.facebookUrl)}" target="_blank" rel="noopener">FB 粉絲專頁</a>`;
+        }
+      } catch { /* 收費表是靜態內容，設定載入失敗也能看 */ }
+    })();
+  </script>
+</body>
+</html>

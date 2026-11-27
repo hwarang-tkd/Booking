@@ -710,7 +710,7 @@ describe('API', () => {
   });
 
   test('靜態頁面與路徑安全', async () => {
-    for (const p of ['/', '/my', '/info', '/admin', '/style.css', '/logo.png']) {
+    for (const p of ['/', '/my', '/info', '/rates', '/rent', '/register', '/admin', '/style.css', '/logo.png']) {
       assert.equal((await req(p)).status, 200, p);
     }
     assert.notEqual((await req('/..%2fserver.js')).status, 200);
