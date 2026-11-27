@@ -1036,6 +1036,30 @@ describe('付費後自動扣抵之前未扣堂的課', () => {
       .every((b) => b.category === 'kids'));
   });
 
+  test('手動改成不扣堂（退回堂數並扣抵其他未扣堂的課）／改回扣堂', async () => {
+    const s2 = await req('/api/admin/students', { method: 'POST', auth: admin, body: { name: '補課生', email: 'waive@example.com' } });
+    const sid = s2.data.id;
+    const pid = (await req(`/api/admin/students/${sid}/passes`, { method: 'POST', auth: admin, body: {
+      name: '1 堂', total: 1, startDate: today(), endDate: T.addDays(today(), 30) } })).data.id;
+    const bk = async (day) => (await req(`/api/admin/slots/${await mkSlot(day, '20:00')}/bookings`, { method: 'POST', auth: admin,
+      body: { studentId: sid } })).data;
+    const a = await bk(3), b = await bk(4);
+    assert.equal(a.pass.name, '1 堂'); assert.equal(b.pass, null);
+    // a 改成不扣堂 → 退回的 1 堂自動扣到 b
+    const w = await req(`/api/admin/bookings/${a.id}/waive`, { method: 'POST', auth: admin, body: { waived: true } });
+    assert.equal(w.data.freed.name, '1 堂');
+    assert.equal(w.data.applied.bookings, 1);
+    const items = (await req(`/api/admin/all-bookings?from=${today()}&to=${T.addDays(today(), 10)}&studentId=${sid}`, { auth: admin })).data.items;
+    assert.equal(items.find((x) => x.id === a.id).waived, true);
+    assert.equal(items.find((x) => x.id === b.id).passName, '1 堂');
+    // 改回扣堂：卡已用完 → 未扣堂
+    const u = await req(`/api/admin/bookings/${a.id}/waive`, { method: 'POST', auth: admin, body: { waived: false } });
+    assert.equal(u.data.pass, null);
+    const again = (await req(`/api/admin/all-bookings?from=${today()}&to=${T.addDays(today(), 10)}&studentId=${sid}`, { auth: admin })).data;
+    assert.equal(again.counts.noPass, 1);
+    assert.equal((await req(`/api/admin/passes/${pid}/usage`, { auth: admin })).data.pass.used, 1);
+  });
+
   test('場地租借：開場租卡後扣抵未付款的租借', async () => {
     const d = T.addDays(today(), 3);
     const r1 = await req('/api/rentals', { method: 'POST', auth: t, body: { type: 'self', date: d, start: '13:00', hours: 2 } });

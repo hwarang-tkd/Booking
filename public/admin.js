@@ -226,7 +226,8 @@
           <td>${b.status === 'active'
             ? `${past && !s.cancelled ? (b.attendance === 'absent'
                 ? `<span class="badge danger">缺席</span> <button class="btn ghost small" data-att="${b.id}:">改為出席</button>`
-                : `<button class="btn ghost small" data-att="${b.id}:absent">缺席</button>`) : ''}<button class="btn ghost small" data-cancel="${b.id}">取消</button>`
+                : `<button class="btn ghost small" data-att="${b.id}:absent">缺席</button>`) : ''}${b.trial ? ''
+              : `<button class="btn ghost small" data-waive="${b.id}:${b.waived ? 0 : 1}" data-pass="${esc(b.passName || '')}">${b.waived ? '改回扣堂' : '不扣堂'}</button>`}<button class="btn ghost small" data-cancel="${b.id}">取消</button>`
             : '<span class="badge">已取消</span>'}</td>
         </tr>`).join('')}</tbody></table>`;
     }
@@ -259,6 +260,7 @@
       const [id, value] = b.dataset.att.split(':');
       try { await call(`/api/admin/bookings/${id}/attendance`, { method: 'POST', body: { value } }); loadSchedule(); } catch (e) { fail(e); }
     });
+    roster.querySelectorAll('[data-waive]').forEach((b) => b.onclick = () => waive(b, loadSchedule));
     roster.querySelectorAll('[data-cancel]').forEach((b) => b.onclick = async () => {
       const name = b.closest('tr').querySelector('b').textContent;
       if (!confirm(`取消 ${name} 的預約？`)) return;
@@ -887,6 +889,20 @@
     } catch (e) { showError($('passErr'), e.message); }
   });
 
+  // 手動改成不扣堂／改回扣堂
+  async function waive(btn, reload) {
+    const [id, v] = btn.dataset.waive.split(':');
+    const on = v === '1', passName = btn.dataset.pass;
+    if (on && !confirm(passName ? `把這堂改成「不扣堂」（例如補課、贈送）？\n會退回「${passName}」1 堂。` : '把這堂改成「不扣堂」（例如補課、贈送）？\n不會再提醒學員繳費。')) return;
+    try {
+      const r = await call(`/api/admin/bookings/${id}/waive`, { method: 'POST', body: { waived: on } });
+      toast(on ? (r.freed ? `已改成不扣堂，退回「${r.freed.name}」1 堂` : '已改成不扣堂')
+        : (r.pass ? `已改回扣堂，扣「${r.pass.name}」` : '已改回扣堂，但沒有可用的堂數，標示為未扣堂'));
+      appliedNotice(r.applied);
+      reload();
+    } catch (e) { fail(e); }
+  }
+
   // 付費後自動扣抵之前未扣堂的課：提醒老師
   function appliedNotice(a) {
     if (!a || !a.units) return;
@@ -1201,7 +1217,8 @@
           <td data-l="${tr('扣堂／費用')}" style="font-size:.85rem">${credit}</td>
           <td data-l="${tr('預約')}" style="font-size:.8rem" class="muted">${it.bookedBy === 'admin' ? (it.kind === 'rental' ? '老師代訂' : '老師代約') : '學員自己'}<br>${logTime(it.createdAt)}
             ${it.note ? `<div style="color:var(--text)">📝 ${esc(it.note)}</div>` : ''}</td>
-          <td data-l="" style="white-space:nowrap">${att}${canCancel ? `<button class="btn ghost small" data-cancel="${it.kind}:${it.id}">取消</button>` : ''}</td>
+          <td data-l="" style="white-space:nowrap">${att}${it.kind === 'class' && !it.trial && ['booked', 'attended', 'absent'].includes(it.status)
+            ? `<button class="btn ghost small" data-waive="${it.id}:${it.waived ? 0 : 1}" data-pass="${esc(it.passName || '')}">${it.waived ? '改回扣堂' : '不扣堂'}</button>` : ''}${canCancel ? `<button class="btn ghost small" data-cancel="${it.kind}:${it.id}">取消</button>` : ''}</td>
         </tr>`;
       }).join('');
       box.innerHTML = `${r.truncated ? '<p class="alert error">資料太多，只顯示前 2,000 筆，請縮小範圍或改用匯出。</p>' : ''}
@@ -1222,6 +1239,7 @@
         const [id, value] = b.dataset.att.split(':');
         try { await call(`/api/admin/bookings/${id}/attendance`, { method: 'POST', body: { value } }); loadAll(); } catch (e) { fail(e); }
       });
+      box.querySelectorAll('[data-waive]').forEach((b) => b.onclick = () => waive(b, loadAll));
       // 點學員姓名 → 只看這位學員（顯示出席率）
       box.querySelectorAll('[data-st]').forEach((el) => el.onclick = (ev) => {
         ev.preventDefault();

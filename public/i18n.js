@@ -279,7 +279,11 @@ const EN = {
   '，仍可預約；這堂課會記為「未扣堂」，請向老師繳費或購買方案。': ' — you can still book. This class will be marked "No credit"; please pay your instructor or buy a plan.',
   '⚠️ 你目前沒有可用的': '⚠️ You currently have no ', '未扣時數': 'No hours used',
 
-  '不扣堂': 'No charge',
+  '不扣堂': 'No charge', '改回扣堂': 'Charge credit', '已改成不扣堂': 'Marked as no charge',
+  '已改回扣堂，但沒有可用的堂數，標示為未扣堂': 'Charging restored, but no usable credits — marked "No credit"',
+  '把這堂改成「不扣堂」（例如補課、贈送）？': 'Mark this class as "No charge" (e.g. make-up or free class)?',
+  '不會再提醒學員繳費。': 'The student will no longer be reminded to pay.',
+  '已取消的預約不能修改扣堂': 'Cancelled bookings can\'t be changed', '體驗課本來就不扣堂': 'Trial classes never use credits',
   // 代約扣堂選項
   '扣堂': 'Credit', '自動（扣最快到期的堂數卡）': 'Automatic (soonest-expiring card)', '不扣堂（補課、贈送、現場付費）': 'Don\'t use credit (make-up, free, paid on site)',
   '選擇學員後，可以指定要扣哪一張堂數卡。': 'After choosing a student you can pick which card to use.',
@@ -527,6 +531,9 @@ const PATTERNS = [
   ['💡 已自動扣抵之前「未扣時數」的場地租借 {} 筆，共 {} 小時。', (n, h) => `💡 Applied to ${n} earlier unpaid rental(s) — ${h} h.`],
   ['💡 已自動扣抵之前「未扣堂」的課 {} 堂。', (n) => `💡 Applied to ${n} earlier class(es) that had no credit.`],
   ['可以在堂數卡的「使用紀錄」看到是哪幾堂。', () => 'See which ones under the card\'s "Usage".'],
+  ['會退回「{}」1 堂。', (n) => `1 credit will be returned to "${n}".`],
+  ['已改成不扣堂，退回「{}」1 堂', (n) => `Marked as no charge — 1 credit returned to "${n}"`],
+  ['已改回扣堂，扣「{}」', (n) => `Charging restored — used "${n}"`],
   // 後台：固定課表
   ['{}・名額 {}', (s, n) => `${s} · capacity ${n}`], ['名額 {}', (n) => `Capacity ${n}`],
   ['從固定課表刪除「{} {} {}」？', (d, t, c) => `Remove "${c}" (${d} ${t}) from the weekly schedule?`],

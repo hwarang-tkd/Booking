@@ -1162,6 +1162,20 @@ function createApp(cfg) {
     return { ok: true };
   });
 
+  // 手動改成不扣堂（補課、贈送）／改回扣堂
+  route('POST', /^\/api\/admin\/bookings\/(\d+)\/waive$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    const b = store.getBooking(Number(id));
+    if (!b) throw new HttpError(404, '找不到這筆預約');
+    if (b.status !== 'active') throw new HttpError(409, '已取消的預約不能修改扣堂');
+    if (b.trial) throw new HttpError(409, '體驗課本來就不扣堂');
+    const r = store.setWaived(b.id, body.waived === true);
+    const freedPass = r.freed ? store.getPass(r.freed) : null;
+    // 退回的那一堂，可以自動扣抵這位學員其他未扣堂的課
+    const applied = freedPass ? applyUnpaid(freedPass.id) : null;
+    return { ok: true, pass: r.pass && publicPass(r.pass), freed: freedPass && publicPass(store.getPass(freedPass.id)), applied };
+  });
+
   // 堂數卡／場租時數卡的使用紀錄
   function passUsage(p) {
     const nowT = now();
