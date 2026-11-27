@@ -298,23 +298,62 @@
       .map((x) => `<option value="${esc(`${x.name} <${x.email}>`)}"></option>`).join('');
     $('addSummary').innerHTML = `<b>${esc(ctitle(s))}</b><br>${fmtSlot(s)}　目前 ${s.booked}/${s.capacity}`;
     $('addErr').classList.add('hidden');
+    addPassFor(null);
     $('addDlg').showModal();
   }
+
+  // 接受「姓名 <信箱>」（從清單選）、姓名或信箱；同一信箱可能有多位學員
+  function matchWho(v) {
+    const who = v.trim().toLowerCase();
+    const active = students.filter((x) => x.active);
+    let m = active.filter((x) => `${x.name} <${x.email}>`.toLowerCase() === who);
+    if (!m.length) m = active.filter((x) => x.name.toLowerCase() === who);
+    if (!m.length) m = active.filter((x) => x.email.toLowerCase() === who);
+    return m;
+  }
+
+  // 扣堂選項：列出這位學員在這堂課可以用的堂數卡
+  let addPassSeq = 0;
+  async function addPassFor(st) {
+    const sel = $('addForm').usePass, hint = $('addPassHint'), seq = ++addPassSeq;
+    const base = '<option value="auto">自動（扣最快到期的堂數卡）</option>';
+    const none = '<option value="none">不扣堂（補課、贈送、現場付費）</option>';
+    if (!st) { sel.innerHTML = base + none; hint.className = 'muted'; hint.style.color = ''; hint.textContent = '選擇學員後，可以指定要扣哪一張堂數卡。'; return; }
+    try {
+      const { passes } = await call(`/api/admin/students/${st.id}/passes`);
+      if (seq !== addPassSeq) return;
+      const date = adding.startAt.slice(0, 10);
+      const ok = passes.filter((p) => p.kind !== 'rental' && p.status !== 'void' && p.startDate <= date && date <= p.endDate
+        && (p.unlimited || p.remaining > 0))
+        .sort((a, b) => b.unlimited - a.unlimited || a.endDate.localeCompare(b.endDate) || a.id - b.id);
+      sel.innerHTML = ok.map((p) => `<option value="${p.id}">扣「${esc(p.name)}」（${p.unlimited ? '無限堂' : `剩 ${p.remaining} 堂`}・到期 ${fmtDate(p.endDate)}）</option>`).join('') + none;
+      if (ok.length) {
+        hint.textContent = `${st.name} 有 ${ok.length} 張可用的堂數卡，預設扣最快到期的那張。`;
+        hint.className = 'muted'; hint.style.color = '';
+        sel.value = String(ok[0].id);
+      } else {
+        sel.innerHTML = '<option value="none">沒有可用的堂數卡 → 記為「未扣堂」</option>';
+        hint.textContent = `${st.name} 目前沒有可用的堂數，仍可代約，名單會標示「未扣堂」。`;
+        hint.className = ''; hint.style.color = 'var(--warn)';
+      }
+    } catch (e) { hint.textContent = e.message; }
+  }
+  $('addForm').who.addEventListener('input', (ev) => {
+    const m = matchWho(ev.target.value);
+    addPassFor(m.length === 1 ? m[0] : null);
+  });
+  $('addForm').trial.addEventListener('change', (ev) => { $('addPassField').classList.toggle('hidden', ev.target.checked); });
   $('addForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const f = ev.target;
     try {
-      // 接受「姓名 <信箱>」（從清單選）、姓名或信箱；同一信箱可能有多位學員
-      const who = f.who.value.trim().toLowerCase();
-      const active = students.filter((x) => x.active);
-      let matches = active.filter((x) => `${x.name} <${x.email}>`.toLowerCase() === who);
-      if (!matches.length) matches = active.filter((x) => x.name.toLowerCase() === who);
-      if (!matches.length) matches = active.filter((x) => x.email.toLowerCase() === who);
+      const matches = matchWho(f.who.value);
       if (matches.length !== 1) {
         throw new Error(matches.length ? '符合的學員不只一位，請從清單選擇「姓名 <信箱>」' : '找不到這位學員，請先到「學員資料」新增');
       }
       const r = await call(`/api/admin/slots/${adding.id}/bookings`, { method: 'POST', body: {
-        studentId: matches[0].id, note: f.note.value, trial: f.trial.checked, usePass: f.nopass.checked ? 'none' : 'auto',
+        studentId: matches[0].id, note: f.note.value, trial: f.trial.checked,
+        usePass: /^\d+$/.test(f.usePass.value) ? Number(f.usePass.value) : f.usePass.value,
       } });
       openRosters.add(adding.id);
       $('addDlg').close();

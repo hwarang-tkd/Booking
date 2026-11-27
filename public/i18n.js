@@ -279,6 +279,10 @@ const EN = {
   '，仍可預約；這堂課會記為「未扣堂」，請向老師繳費或購買方案。': ' — you can still book. This class will be marked "No credit"; please pay your instructor or buy a plan.',
   '⚠️ 你目前沒有可用的': '⚠️ You currently have no ', '未扣時數': 'No hours used',
 
+  // 代約扣堂選項
+  '扣堂': 'Credit', '自動（扣最快到期的堂數卡）': 'Automatic (soonest-expiring card)', '不扣堂（補課、贈送、現場付費）': 'Don\'t use credit (make-up, free, paid on site)',
+  '選擇學員後，可以指定要扣哪一張堂數卡。': 'After choosing a student you can pick which card to use.',
+  '沒有可用的堂數卡 → 記為「未扣堂」': 'No usable card → marked "No credit"', '找不到這張堂數卡': 'Card not found',
   // 取消期限聯絡、繳費提醒
   '未扣堂・請記得完成繳費': 'No credit used · please remember to pay', '尚未付款・請記得完成繳費': 'Unpaid · please remember to pay',
   '✅ 預約成功！': '✅ Booked!', '✅ 租借成功！': '✅ Rental booked!',
@@ -514,6 +518,11 @@ const PATTERNS = [
   ['📋 使用紀錄（已用 {} {}）', (n, u) => `📋 Usage (${n} ${u === '小時' ? 'h' : ''} used)`],
   ['{}・已退回', (x) => `${x} · refunded`], ['−{} 堂', (n) => `−${n}`], ['−{} 小時', (n) => `−${n} h`], ['+{} 堂', (n) => `+${n}`], ['+{} 小時', (n) => `+${n} h`],
 
+  ['扣「{}」（無限堂・到期 {}）', (n, d) => `Use "${n}" (unlimited · expires ${d})`],
+  ['扣「{}」（剩 {} 堂・到期 {}）', (n, r, d) => `Use "${n}" (${r} left · expires ${d})`],
+  ['{} 有 {} 張可用的堂數卡，預設扣最快到期的那張。', (n, c) => `${n} has ${c} usable card(s); the soonest-expiring one is selected.`],
+  ['{} 目前沒有可用的堂數，仍可代約，名單會標示「未扣堂」。', (n) => `${n} has no usable credits — you can still book; the roster will show "No credit".`],
+  ['「{}」在這堂課的日期不在有效期間內', (n) => `"${n}" isn't valid on this class date`], ['「{}」已經用完了', (n) => `"${n}" is used up`],
   // 後台：固定課表
   ['{}・名額 {}', (s, n) => `${s} · capacity ${n}`], ['名額 {}', (n) => `Capacity ${n}`],
   ['從固定課表刪除「{} {} {}」？', (d, t, c) => `Remove "${c}" (${d} ${t}) from the weekly schedule?`],

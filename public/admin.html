@@ -281,9 +281,11 @@
         </label>
         <datalist id="studentOptions"></datalist>
         <label class="check"><input type="checkbox" name="trial"><span>體驗課（不扣堂數）</span></label>
-        <label class="check"><input type="checkbox" name="nopass"><span>不扣堂數（例如補課、贈送）</span></label>
+        <label class="field" id="addPassField">扣堂
+          <select name="usePass"><option value="auto">自動（扣最快到期的堂數卡）</option><option value="none">不扣堂（補課、贈送、現場付費）</option></select>
+        </label>
+        <p id="addPassHint" class="muted" style="font-size:.85rem;margin:0">選擇學員後，可以指定要扣哪一張堂數卡。</p>
         <label class="field">備註 <span class="hint">（選填）</span><input type="text" name="note" maxlength="200"></label>
-        <p class="muted" style="font-size:.85rem;margin:0">會自動從學員最快到期的堂數卡扣一堂；沒有堂數時仍可代約，名單會標示「未扣堂」。</p>
         <div id="addErr" class="hidden"></div>
       </div>
       <div class="dlg-foot">

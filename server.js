@@ -1196,7 +1196,8 @@ function createApp(cfg) {
     const r = store.book({
       slotId: Number(id), studentId: st.id, note: str(body.note, 200, '備註', { required: false }),
       trial: body.trial === true, bookedBy: 'admin', isOpen: (s) => !s.cancelled,
-      usePass: body.trial === true || body.usePass === 'none' ? 'none' : 'auto',
+      usePass: body.trial === true || body.usePass === 'none' ? 'none'
+        : Number.isInteger(body.usePass) ? body.usePass : 'auto',
     });
     if (r.error) throw new HttpError(r.status, r.error);
     return { status: 201, body: { id: r.booking.id, pass: r.pass && publicPass(r.pass) } };

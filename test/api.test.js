@@ -961,6 +961,22 @@ describe('預設：沒有堂數／時數也能約，後台標示；點名與出�
     const ot = (await req('/api/password/reset', { method: 'POST', body: { token: new URL(link).searchParams.get('token'), password: 'pass1234' } })).data.token;
     assert.equal((await req(`/api/my/passes/${passId}/usage`, { auth: ot })).status, 404);
   });
+
+  test('代約可以指定扣哪張卡或不扣堂', async () => {
+    const mk = (name, end) => req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: admin, body: {
+      name, total: 2, startDate: T.addDays(today(), -1), endDate: end } }).then((r) => r.data.id);
+    const late = await mk('晚到期', T.addDays(today(), 60));
+    await mk('早到期', T.addDays(today(), 10));
+    const book = async (usePass, day) => req(`/api/admin/slots/${await mkSlot(T.addDays(today(), day), '18:00')}/bookings`,
+      { method: 'POST', auth: admin, body: { studentId: st, usePass } });
+    assert.equal((await book('auto', 6)).data.pass.name, '早到期');          // 自動：最快到期
+    assert.equal((await book(late, 7)).data.pass.name, '晚到期');         // 指定
+    assert.equal((await book('none', 8)).data.pass, null);                // 不扣堂
+    assert.equal((await book(late, 70)).status, 409);                     // 不在有效期間
+    assert.equal((await book(999999, 9)).status, 404);                    // 不是這位學員的卡
+    await book(late, 10);
+    assert.match((await book(late, 11)).data.error, /用完/);
+  });
 });
 
 test('舊版資料庫（預約代碼）可以升級', () => {
