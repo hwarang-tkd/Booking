@@ -279,6 +279,10 @@ const EN = {
   '，仍可預約；這堂課會記為「未扣堂」，請向老師繳費或購買方案。': ' — you can still book. This class will be marked "No credit"; please pay your instructor or buy a plan.',
   '⚠️ 你目前沒有可用的': '⚠️ You currently have no ', '未扣時數': 'No hours used',
 
+  // 取消期限聯絡、繳費提醒
+  '未扣堂・請記得完成繳費': 'No credit used · please remember to pay', '尚未付款・請記得完成繳費': 'Unpaid · please remember to pay',
+  '✅ 預約成功！': '✅ Booked!', '✅ 租借成功！': '✅ Rental booked!',
+  '⚠️ 這堂課沒有扣到堂數（未扣堂），請記得向教練完成繳費喔！': '⚠️ No credit was used for this class — please remember to pay your instructor.',
   // 點名、出席率、使用紀錄
   '缺席': 'Absent', '出席': 'Present', '改為出席': 'Mark present', '出席率': 'Attendance', '（選填，從清單選擇）': '(optional — pick from the list)',
   '只看「未扣堂／未扣時數」（沒有用到堂數或時數，可能需要收費）': 'Only "no credit / no hours used" (may need payment)',
@@ -323,8 +327,8 @@ const PATTERNS = [
   ['至 {}', (t) => `to ${t}`], ['{}・今天', (d) => `${d} · Today`],
 
   // 預約頁
-  ['點選日期，查看當天可預約的課程。開放預約未來 {} 天內的課程，上課前 {} 小時內無法線上取消。',
-    (d, h) => `Pick a date to see available classes. Booking opens ${d} days ahead; cancellations close ${h} hours before class.`],
+  ['點選日期，查看當天可預約的課程。開放預約未來 {} 天內的課程，上課前 {} 小時內無法線上取消，如需取消請聯絡教練或 {}。',
+    (d, h, m) => `Pick a date to see available classes. Booking opens ${d} days ahead. Online cancellation closes ${h} hours before class — to cancel after that, contact your instructor or ${m}.`],
   ['點選日期，查看當天可預約的課程。開放預約未來 {} 天內的課程。', (d) => `Pick a date to see available classes. Booking opens ${d} days ahead.`],
   ['{}，{} 堂課', (d, n) => `${d}, ${plural(n, 'class', 'classes')}`], ['{}，沒有課程', (d) => `${d}, no classes`],
   ['剩 {} 位', (n) => `${n} spot${n === '1' ? '' : 's'} left`], ['{}/{} 人', (a, b) => `${a}/${b} booked`],
@@ -341,7 +345,7 @@ const PATTERNS = [
   ['有效期限至 {}', (d) => `Valid until ${d}`], ['{} 開始・有效期限至 {}', (a, b) => `Starts ${a} · valid until ${b}`],
   ['（還有 {} 天）', (n) => `(${plural(n, 'day', 'days')} left)`], ['（還有 {} 天，記得用完喔）', (n) => `(${plural(n, 'day', 'days')} left — use them soon!)`],
   ['購買日 {}', (d) => `Purchased ${d}`], ['適用：{}', (c) => `Valid for: ${c}`],
-  ['學生：{}', (n) => `Student: ${n}`], ['已超過線上取消期限（上課前 {} 小時），請直接聯絡老師', (h) => `Online cancellation closes ${h} hours before class — please contact your instructor`],
+  ['學生：{}', (n) => `Student: ${n}`], ['已超過線上取消期限（上課前 {} 小時），如需取消請聯絡教練或', (h) => `Online cancellation closes ${h} hours before class — to cancel, contact your instructor or`],
   ['確定取消 {}「{}」？', (s, c) => `Cancel ${c}, ${s}?`], ['已取消，退回「{}」1 堂', (p) => `Cancelled — 1 credit returned to "${p}"`],
   ['🎫 {}', (p) => `🎫 ${p}`],
 
@@ -388,7 +392,7 @@ const PATTERNS = [
   ['第 {} 筆：{}', (n, m) => `Row ${n}: ${m}`],
   ['已經用了 {} 堂，總堂數不能少於這個數字', (n) => `${n} credits already used — the total can't be lower than that`],
   ['已有 {} 人預約，名額不能少於這個數字', (n) => `${n} already booked — capacity can't be lower than that`],
-  ['上課前 {} 小時內無法線上取消，請直接聯絡老師', (h) => `Online cancellation closes ${h} hours before class — please contact your instructor`],
+  ['上課前 {} 小時內無法線上取消，請聯絡教練或 {}', (h, m) => `Online cancellation closes ${h} hours before class — please contact your instructor or ${m}`],
   ['請填寫{}', (f) => `Please fill in: ${f}`], ['{}太長（最多 {} 字）', (f, n) => `${f} is too long (max ${n})`],
   ['{}需為 {}–{} 的整數', (f, a, b) => `${f} must be a whole number from ${a} to ${b}`],
 
@@ -442,7 +446,7 @@ const PATTERNS = [
   ['整個場地包場・{} 元／小時（10 小時 5,000 元）', (r) => `Whole venue · NT$${r}/hour (NT$5,000 for 10 hours)`],
   ['同一時段最多 {} 組・{} 元／小時', (c, r) => `Up to ${c} pairs at a time · NT$${r}/hour`],
   ['同一時段最多 {} 人・每人 {} 元／小時', (c, r) => `Up to ${c} people at a time · NT$${r} per person/hour`],
-  ['費用請於使用前付清。開始前 {} 小時內無法線上取消。', (h) => `Please pay before using the venue. Online cancellation closes ${h} hours before the start.`],
+  ['費用請於使用前付清。開始前 {} 小時內無法線上取消（請聯絡教練或 {}）。', (h, m) => `Please pay before using the venue. Online cancellation closes ${h} hours before the start (contact your instructor or ${m}).`],
   ['{} 小時', (n) => (/^[\d.]+$/.test(n) ? `${n} ${Number(n) === 1 ? 'hour' : 'hours'}` : null)],
   ['{} 人', (n) => (/^\d+$/.test(n) ? `${n} ${n === '1' ? 'person' : 'people'}` : null)],
   ['{} 元', (n) => (/^[\d,]+$/.test(n) ? `NT$${n}` : null)],
@@ -457,7 +461,7 @@ const PATTERNS = [
   ['場地開放時間為 {}', (x) => `The venue is open ${x}`], ['只能預約 {} 天內的場地', (n) => `You can book up to ${n} days ahead`],
   ['租借時數需為 1～{} 小時（以半小時為單位）', (n) => `Rental length must be 1–${n} hours, in half-hour steps`],
   ['場地需在開始前 {} 小時完成預約', (h) => `The venue must be booked at least ${h} hours in advance`],
-  ['開始前 {} 小時內無法線上取消，請直接聯絡老師', (h) => `Online cancellation closes ${h} hours before the start — please contact your instructor`],
+  ['開始前 {} 小時內無法線上取消，請聯絡教練或 {}', (h, m) => `Online cancellation closes ${h} hours before the start — please contact your instructor or ${m}`],
   ['這個時段的自主訓練只剩 {} 個名額', (n) => `only ${n} self-training spots left`],
   ['{} {}：{}', (d, t, m) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} ${t}: ${m}` : null)],
 
@@ -466,8 +470,10 @@ const PATTERNS = [
   ['」扣 {} 小時，租借後剩 {} 小時（{} 到期）', (u, r, d) => `": ${u} h, ${r} h left after (expires ${d})`],
   ['🏟 將使用「', () => '🏟 Uses "'],
   ['」扣', () => '": '],
-  ['租借會扣你的場地租借時數（自主訓練按人數 × 小時）。開始前 {} 小時內無法線上取消，取消會退回時數。',
-    (h) => `Rentals use your venue rental hours (self-training: people × hours). Online cancellation closes ${h} hours before the start; cancelling returns the hours.`],
+  ['租借會扣你的場地租借時數（自主訓練按人數 × 小時）。開始前 {} 小時內無法線上取消（請聯絡教練或 {}），取消會退回時數。',
+    (h, m) => `Rentals use your venue rental hours (self-training: people × hours). Online cancellation closes ${h} hours before the start (contact your instructor or ${m}); cancelling returns the hours.`],
+  ['⚠️ 你有 {} 堂課沒有扣到堂數（未扣堂），請記得向教練完成繳費。', (n) => `⚠️ ${n} of your classes didn't use any credit — please remember to pay your instructor.`],
+  ['⚠️ 這次沒有扣到場地時數，費用 {} 元，請記得向教練完成繳費喔！', (p) => `⚠️ No rental hours were used — please remember to pay NT$${p} to your instructor.`],
   ['扣', () => 'Uses '], ['小時（價值 {} 元）', (p) => ` h (worth NT$${p})`], ['小時，租借後剩', () => ' h, '], ['小時（{} 到期）', (d) => ` h left after (expires ${d})`],
   ['⚠️ 你沒有足夠的', () => '⚠️ You don\'t have enough '],
   ['（這次需要 {} 小時）。請聯絡老師購買或續約。', (n) => ` (this rental needs ${n} hours). Please contact your instructor to buy or renew.`],

@@ -13,8 +13,8 @@
 
   $('intro').textContent = `只能租沒有課程的時段。開放時間 ${rc.open}–${rc.close}，需在開始前 ${rc.cutoffHours} 小時完成預約。`;
   $('rules').textContent = rc.requirePass
-    ? `租借會扣你的場地租借時數（自主訓練按人數 × 小時）。開始前 ${rc.cancelHours} 小時內無法線上取消，取消會退回時數。`
-    : `費用請於使用前付清。開始前 ${rc.cancelHours} 小時內無法線上取消。`;
+    ? `租借會扣你的場地租借時數（自主訓練按人數 × 小時）。開始前 ${rc.cancelHours} 小時內無法線上取消（請聯絡教練或 ${rc.contactEmail}），取消會退回時數。`
+    : `費用請於使用前付清。開始前 ${rc.cancelHours} 小時內無法線上取消（請聯絡教練或 ${rc.contactEmail}）。`;
 
   // ---------- 類型 ----------
   const DESC = {
@@ -195,6 +195,7 @@
       toast(`✅ 已租借 ${fmtDate(r.rental.date)} ${r.rental.start}–${r.rental.end}`
         + (r.pass ? (r.pass.unlimited ? `，使用「${r.pass.name}」` : `，「${r.pass.name}」剩 ${r.pass.remaining} 小時`)
           : `，費用 ${r.rental.price.toLocaleString()} 元`));
+      if (!r.pass) alert(`✅ 租借成功！\n\n⚠️ 這次沒有扣到場地時數，費用 ${r.rental.price.toLocaleString()} 元，請記得向教練完成繳費喔！`);
       f.note.value = '';
       loadDay();
     } catch (e) {

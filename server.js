@@ -41,6 +41,7 @@ function loadConfig(env = process.env) {
     addressNote: env.SCHOOL_ADDRESS_NOTE ?? '近善導寺捷運站 5 號出口',
     facebookUrl: env.FACEBOOK_URL || '',
     cancelHours: num(env.CANCEL_HOURS, 2),
+    contactEmail: env.CONTACT_EMAIL || 'hwarangtw20@gmail.com',
     bookCutoffMinutes: num(env.BOOK_CUTOFF_MINUTES, 0),
     bookAheadDays: num(env.BOOK_AHEAD_DAYS, 28) || 28,
     seedSchedule: env.SEED_SCHEDULE !== '0',
@@ -301,7 +302,7 @@ function createApp(cfg) {
     schoolName: cfg.schoolName, address: cfg.address, addressNote: cfg.addressNote, facebookUrl: cfg.facebookUrl,
     schoolNameEn: cfg.schoolNameEn, addressEn: cfg.addressEn, addressNoteEn: cfg.addressNoteEn,
     cancelHours: cfg.cancelHours, bookAheadDays: cfg.bookAheadDays, timeZone: cfg.timeZone, now: now(),
-    categories: CATEGORIES,
+    contactEmail: cfg.contactEmail, categories: CATEGORIES,
   }));
 
   route('GET', /^\/api\/templates$/, () => ({ templates: store.listTemplates().map(publicTemplate) }));
@@ -488,7 +489,7 @@ function createApp(cfg) {
     const b = store.getBooking(Number(id));
     if (!b || !family.some((x) => x.id === b.student_id)) throw new HttpError(404, '找不到這筆預約');
     if (b.status !== 'active') throw new HttpError(409, '這筆預約已經取消了');
-    if (!canCancel(store.getSlot(b.slot_id))) throw new HttpError(409, `上課前 ${cfg.cancelHours} 小時內無法線上取消，請直接聯絡老師`);
+    if (!canCancel(store.getSlot(b.slot_id))) throw new HttpError(409, `上課前 ${cfg.cancelHours} 小時內無法線上取消，請聯絡教練或 ${cfg.contactEmail}`);
     store.cancelBooking(b.id);
     return { ok: true };
   });
@@ -537,6 +538,7 @@ function createApp(cfg) {
   route('GET', /^\/api\/rentals\/config$/, () => ({
     types: publicRentalTypes(), open: cfg.rentalOpen, close: cfg.rentalClose, maxHours: cfg.rentalMaxHours,
     bookAheadDays: cfg.bookAheadDays, cancelHours: cfg.cancelHours, cutoffHours: cfg.rentalCutoffHours, now: now(),
+    contactEmail: cfg.contactEmail,
     requirePass: cfg.requireRentalPass,
   }));
 
@@ -594,7 +596,7 @@ function createApp(cfg) {
     if (!r || !family.some((x) => x.id === r.student_id)) throw new HttpError(404, '找不到這筆租借');
     if (r.status !== 'active') throw new HttpError(409, '這筆租借已經取消了');
     if (T.minutesBetween(now(), `${r.date}T${r.start}`) < cfg.cancelHours * 60) {
-      throw new HttpError(409, `開始前 ${cfg.cancelHours} 小時內無法線上取消，請直接聯絡老師`);
+      throw new HttpError(409, `開始前 ${cfg.cancelHours} 小時內無法線上取消，請聯絡教練或 ${cfg.contactEmail}`);
     }
     store.cancelRental(r.id);
     return { ok: true };

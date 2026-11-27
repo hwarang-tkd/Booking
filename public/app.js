@@ -13,7 +13,7 @@
   }
   if (!auth.token) $('newbie').classList.remove('hidden');
   $('intro').textContent = `點選日期，查看當天可預約的課程。開放預約未來 ${cfg.bookAheadDays} 天內的課程` +
-    (cfg.cancelHours > 0 ? `，上課前 ${cfg.cancelHours} 小時內無法線上取消。` : '。');
+    (cfg.cancelHours > 0 ? `，上課前 ${cfg.cancelHours} 小時內無法線上取消，如需取消請聯絡教練或 ${cfg.contactEmail}。` : '。');
 
   async function load() {
     try {
@@ -207,6 +207,7 @@
       $('bookDlg').close();
       toast(`✅ ${auth.students.length > 1 ? `已幫 ${r.student.name} 預約` : '已預約'} ${fmtSlot(r.slot)}「${ctitle(r.slot)}」`
         + (r.pass && !r.pass.unlimited ? `，「${r.pass.name}」剩 ${r.pass.remaining} 堂` : ''));
+      if (!r.pass) alert('✅ 預約成功！\n\n⚠️ 這堂課沒有扣到堂數（未扣堂），請記得向教練完成繳費喔！');
       load();
     } catch (e) {
       if (e.status === 401) { $('bookDlg').close(); openBooking(booking); return; }

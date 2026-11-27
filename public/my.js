@@ -39,6 +39,12 @@
       const past = bookings.filter((b) => b.past && b.status === 'active' && !b.slotCancelled);
       const cancelled = bookings.filter((b) => !b.past && b.status === 'cancelled');
       res.innerHTML = '';
+      const owe = upcoming.filter(unpaid).length;
+      if (owe) {
+        const w = document.createElement('div'); w.className = 'alert error';
+        w.textContent = `⚠️ 你有 ${owe} 堂課沒有扣到堂數（未扣堂），請記得向教練完成繳費。`;
+        res.appendChild(w);
+      }
       const section = (title, items, empty) => {
         const h = document.createElement('h2'); h.textContent = title; res.appendChild(h);
         if (!items.length && empty) {
@@ -107,6 +113,8 @@
     catch (e) { body.textContent = e.message; }
   }, true);
 
+  const unpaid = (b) => b.status === 'active' && !b.slotCancelled && !b.passName && !b.trial;
+
   function card(b) {
     const el = document.createElement('div');
     el.className = 'card slot cat';
@@ -122,9 +130,10 @@
         <div class="title" ${cancelled ? 'style="text-decoration:line-through;opacity:.6"' : ''}>${esc(ctitle(b))}</div>
         ${csub(b) ? `<div class="subtitle">${esc(csub(b))}</div>` : ''}
         <div class="meta">${badge}${b.trial ? '<span class="badge warn">體驗課</span>' : ''}
+          ${unpaid(b) ? '<span class="badge warn">未扣堂・請記得完成繳費</span>' : ''}
           ${b.passName && !cancelled && !b.slotCancelled ? `<span class="muted" style="font-size:.82rem">🎫 ${esc(b.passName)}</span>` : ''}
           ${!cancelled && !b.past && !b.slotCancelled && !b.cancellable
-            ? `<span class="muted" style="font-size:.85rem">已超過線上取消期限（上課前 ${cfg.cancelHours} 小時），請直接聯絡老師</span>` : ''}
+            ? `<span class="muted" style="font-size:.85rem">已超過線上取消期限（上課前 ${cfg.cancelHours} 小時），如需取消請聯絡教練或 <a href="mailto:${esc(cfg.contactEmail)}">${esc(cfg.contactEmail)}</a></span>` : ''}
         </div>
       </div>
       ${b.cancellable ? '<div class="actions"><button class="btn danger small">取消預約</button></div>' : ''}`;
@@ -165,7 +174,7 @@
             <div class="title" ${cancelled ? 'style="text-decoration:line-through;opacity:.6"' : ''}>${esc(RENT_NAME[r.type])}${r.type === 'self' ? `・${r.people} 人` : ''}</div>
             <div class="note">${r.start}–${r.end}・${r.passName ? `🏟 ${esc(r.passName)}（${r.units} 小時）` : `${r.price.toLocaleString()} 元`}${r.note ? `・${esc(r.note)}` : ''}</div>
             <div class="meta">${cancelled ? '<span class="badge">已取消</span>' : r.past ? '<span class="badge">已使用</span>' : '<span class="badge ok">已預約</span>'}
-              ${!cancelled && !r.passName ? (r.paid ? '<span class="badge ok">已付款</span>' : '<span class="badge warn">尚未付款</span>') : ''}</div>
+              ${!cancelled && !r.passName ? (r.paid ? '<span class="badge ok">已付款</span>' : '<span class="badge warn">尚未付款・請記得完成繳費</span>') : ''}</div>
           </div>
           ${r.cancellable ? '<div class="actions"><button class="btn danger small">取消</button></div>' : ''}`;
         el.querySelector('button')?.addEventListener('click', async (ev) => {

@@ -97,6 +97,7 @@ npm start
 | `DB_PATH` | `data/booking.db` | 資料庫位置 |
 | `TIMEZONE` | `Asia/Taipei` | 課程時間所在時區 |
 | `CANCEL_HOURS` | `2` | 上課前幾小時內不能線上取消 |
+| `CONTACT_EMAIL` | `hwarangtw20@gmail.com` | 超過取消期限時，請學員聯絡的信箱 |
 | `BOOK_CUTOFF_MINUTES` | `0` | 上課前幾分鐘停止預約 |
 | `BOOK_AHEAD_DAYS` | `28` | 學生可預約未來幾天內的課 |
 
