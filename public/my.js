@@ -113,7 +113,7 @@
     catch (e) { body.textContent = e.message; }
   }, true);
 
-  const unpaid = (b) => b.status === 'active' && !b.slotCancelled && !b.passName && !b.trial;
+  const unpaid = (b) => b.status === 'active' && !b.slotCancelled && !b.passName && !b.trial && !b.waived;
 
   function card(b) {
     const el = document.createElement('div');

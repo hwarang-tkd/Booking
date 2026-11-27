@@ -937,8 +937,12 @@ describe('預設：沒有堂數／時數也能約，後台標示；點名與出�
   });
 
   test('堂數卡使用紀錄（後台與學員）', async () => {
+    // 先把前面測試留下的未扣堂結清（開卡會自動扣抵）
+    const old = await req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: admin, body: {
+      name: '舊帳', total: 10, startDate: T.addDays(today(), -10), endDate: T.addDays(today(), 3) } });
+    assert.equal(old.data.applied.bookings, 4);
     passId = (await req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: admin, body: {
-      name: '4 堂', total: 4, startDate: T.addDays(today(), -5), endDate: T.addDays(today(), 20) } })).data.id;
+      name: '4 堂', total: 4, startDate: T.addDays(today(), 3), endDate: T.addDays(today(), 20) } })).data.id;
     const s1 = await mkSlot(T.addDays(today(), 4), '10:00'), s2 = await mkSlot(T.addDays(today(), 5), '10:00');
     await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: s1 } });
     const b2 = (await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: s2 } })).data;
@@ -976,6 +980,72 @@ describe('預設：沒有堂數／時數也能約，後台標示；點名與出�
     assert.equal((await book(999999, 9)).status, 404);                    // 不是這位學員的卡
     await book(late, 10);
     assert.match((await book(late, 11)).data.error, /用完/);
+  });
+});
+
+describe('付費後自動扣抵之前未扣堂的課', () => {
+  let req, server, admin, t, st;
+  before(async () => {
+    ({ req, server } = await start({ seedSchedule: false }));
+    admin = (await req('/api/admin/login', { method: 'POST', body: { password: 'secret' } })).data.token;
+    st = (await req('/api/admin/students', { method: 'POST', auth: admin, body: { name: '先上課', email: 'later@example.com' } })).data.id;
+    const link = (await req(`/api/admin/students/${st}/reset-link`, { method: 'POST', auth: admin })).data.url;
+    t = (await req('/api/password/reset', { method: 'POST', body: { token: new URL(link).searchParams.get('token'), password: 'pass1234' } })).data.token;
+  });
+  after(() => server.close());
+  const mkSlot = async (day, time = '10:00', category = 'tkd') => (await req('/api/admin/slots', { method: 'POST', auth: admin, body: {
+    title: '課', category, date: T.addDays(today(), day), time, duration: 60, capacity: 5 } })).data.id;
+
+  test('開卡後依日期扣抵；不扣堂、體驗課、取消、停課、其他課種、卡片範圍外的不扣', async () => {
+    const book = async (day, extra = {}, cat) => (await req(`/api/admin/slots/${await mkSlot(day, '10:00', cat)}/bookings`,
+      { method: 'POST', auth: admin, body: { studentId: st, ...extra } })).data.id;
+    await book(-2);                                   // 過去：未扣堂
+    await req('/api/bookings', { method: 'POST', auth: t, body: { slotId: await mkSlot(2) } });  // 學員自己約：未扣堂
+    await book(3, { usePass: 'none' });               // 老師刻意不扣
+    await book(4, { trial: true });                   // 體驗課
+    const c = await book(5);                          // 之後取消
+    await req(`/api/admin/bookings/${c}/cancel`, { method: 'POST', auth: admin });
+    const sc = await mkSlot(6);                       // 之後停課
+    await req(`/api/admin/slots/${sc}/bookings`, { method: 'POST', auth: admin, body: { studentId: st } });
+    await req(`/api/admin/slots/${sc}/cancel`, { method: 'POST', auth: admin });
+    await book(7, {}, 'kids');                        // 卡片不適用的課種
+    await book(40);                                   // 超過卡片到期日
+    await book(8); await book(9);                     // 卡片只剩 1 堂可扣（先扣到 8）
+
+    const all0 = (await req(`/api/admin/all-bookings?from=${T.addDays(today(), -10)}&to=${T.addDays(today(), 60)}&noPass=1`, { auth: admin })).data;
+    const r = await req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: admin, body: {
+      name: '3 堂', total: 3, startDate: T.addDays(today(), -5), endDate: T.addDays(today(), 30), categories: ['tkd'] } });
+    assert.deepEqual(r.data.applied, { bookings: 3, rentals: 0, units: 3 });
+    const u = (await req(`/api/admin/passes/${r.data.id}/usage`, { auth: admin })).data;
+    assert.equal(u.pass.used, 3);
+    assert.deepEqual(u.items.map((x) => x.date).sort(), [-2, 2, 8].map((d) => T.addDays(today(), d)));
+    const all1 = (await req(`/api/admin/all-bookings?from=${T.addDays(today(), -10)}&to=${T.addDays(today(), 60)}&noPass=1`, { auth: admin })).data;
+    assert.equal(all1.counts.noPass, all0.counts.noPass - 3);
+    // 不扣堂的不算「未扣堂」
+    const waived = (await req(`/api/admin/all-bookings?from=${T.addDays(today(), 3)}&to=${T.addDays(today(), 3)}`, { auth: admin })).data.items[0];
+    assert.equal(waived.waived, true); assert.equal(waived.noPass, false);
+    // 展延 → 之前範圍外的也扣（卡片已用完則不扣），加堂數後再扣
+    const ext = await req(`/api/admin/passes/${r.data.id}/extend`, { method: 'POST', auth: admin, body: { endDate: T.addDays(today(), 60) } });
+    assert.equal(ext.data.applied.bookings, 0);
+    const ed = await req(`/api/admin/passes/${r.data.id}`, { method: 'PUT', auth: admin, body: {
+      name: '3 堂', total: 10, startDate: T.addDays(today(), -5), endDate: T.addDays(today(), 60), categories: ['tkd'] } });
+    assert.equal(ed.data.applied.bookings, 2);        // 9 天後、40 天後
+    // 學員端不再顯示要繳費
+    const mine = (await req('/api/my/bookings', { auth: t })).data.bookings;
+    assert.ok(mine.filter((b) => b.status === 'active' && !b.slotCancelled && !b.trial && !b.waived && !b.passName)
+      .every((b) => b.category === 'kids'));
+  });
+
+  test('場地租借：開場租卡後扣抵未付款的租借', async () => {
+    const d = T.addDays(today(), 3);
+    const r1 = await req('/api/rentals', { method: 'POST', auth: t, body: { type: 'self', date: d, start: '13:00', hours: 2 } });
+    assert.equal(r1.status, 201);
+    const p = await req(`/api/admin/students/${st}/passes`, { method: 'POST', auth: admin, body: {
+      name: '場租 10 小時', kind: 'rental', total: 10, startDate: today(), endDate: T.addDays(today(), 30) } });
+    assert.deepEqual(p.data.applied, { bookings: 0, rentals: 1, units: 2 });
+    const mine = (await req('/api/my/rentals', { auth: t })).data.rentals;
+    assert.equal(mine[0].passName, '場租 10 小時');
+    assert.equal(mine[0].units, 2);
   });
 });
 

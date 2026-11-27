@@ -477,6 +477,7 @@ function createApp(cfg) {
       bookings: rows.map((b) => ({
         studentId: b.st.id, studentName: b.st.name,
         id: b.id, status: b.status, trial: !!b.trial, note: b.note, passName: b.pass_name, title: b.title, subtitle: b.subtitle,
+        waived: !!b.waived,
         titleEn: b.title_en, subtitleEn: b.subtitle_en,
         category: b.category, startAt: b.start_at, durationMin: b.duration_min, past: b.start_at <= now(),
         slotCancelled: !!b.slot_cancelled, cancellable: b.status === 'active' && !b.slot_cancelled && canCancel(b),
@@ -673,7 +674,7 @@ function createApp(cfg) {
       rental: ['日期', '星期', '時間', '時數', '類型', '租借人', '電話', '人數', '金額', '付款', '使用時數卡', '扣除時數', '狀態', '預約方式', '備註'],
       perStudent: ['學員', '信箱', '已上課', '缺席', '出席率', '已預約（未上）', '學員取消', '停課', '未扣堂', '場地租借筆數', '場地租借金額'],
       st: { attended: '已上課', absent: '缺席', booked: '已預約', cancelled: '學員取消', slotCancelled: '停課', rentCancelled: '已取消', used: '已使用' },
-      yes: '是', paid: '已付款', unpaid: '未付款', unlimited: '（無限堂）', noPass: '未扣堂', byAdmin: '老師代約', bySelf: '學員自己',
+      yes: '是', paid: '已付款', unpaid: '未付款', unlimited: '（無限堂）', noPass: '未扣堂', waived: '不扣堂', byAdmin: '老師代約', bySelf: '學員自己',
       byAdminRent: '老師代訂',
       sheets: ['摘要', '約課', '場地租借', '學員統計'],
       sum: ['期間', '學員', '約課（不含取消）', '已上課', '已預約（未上）', '學員取消', '停課', '未扣堂（可能需收費）', '缺席', '出席率',
@@ -685,7 +686,7 @@ function createApp(cfg) {
       rental: ['Date', 'Day', 'Time', 'Hours', 'Type', 'Renter', 'Phone', 'People', 'Amount', 'Payment', 'Hours card', 'Hours used', 'Status', 'Booked by', 'Note'],
       perStudent: ['Student', 'Email', 'Attended', 'Absent', 'Attendance', 'Upcoming', 'Cancelled', 'Class cancelled', 'No credit', 'Rentals', 'Rental amount'],
       st: { attended: 'Attended', absent: 'Absent', booked: 'Booked', cancelled: 'Cancelled', slotCancelled: 'Class cancelled', rentCancelled: 'Cancelled', used: 'Used' },
-      yes: 'Yes', paid: 'Paid', unpaid: 'Unpaid', unlimited: ' (unlimited)', noPass: 'No credit', byAdmin: 'Instructor', bySelf: 'Student',
+      yes: 'Yes', paid: 'Paid', unpaid: 'Unpaid', unlimited: ' (unlimited)', noPass: 'No credit', waived: 'No charge', byAdmin: 'Instructor', bySelf: 'Student',
       byAdminRent: 'Instructor',
       sheets: ['Summary', 'Bookings', 'Rentals', 'By student'],
       sum: ['Period', 'Student', 'Bookings (excl. cancelled)', 'Attended', 'Upcoming', 'Cancelled by student', 'Class cancelled',
@@ -726,10 +727,11 @@ function createApp(cfg) {
       const status = classStatus(b, nowT);
       const endT = T.fromMs(T.toMs(b.start_at) + b.duration_min * 60000).slice(11);
       return {
-        studentId: b.student_id, status, noPass: status !== 'cancelled' && status !== 'slotCancelled' && !b.pass_name && !b.trial,
+        studentId: b.student_id, status, noPass: status !== 'cancelled' && status !== 'slotCancelled' && !b.pass_name && !b.trial && !b.waived,
         row: [b.start_at.slice(0, 10), dowOf(b.start_at.slice(0, 10)), `${b.start_at.slice(11)}–${endT}`,
           (lang === 'en' && b.title_en) || b.title, b.name, b.email, b.phone, t.st[status],
-          b.pass_name ? b.pass_name + (b.pass_unlimited ? t.unlimited : '') : (b.trial || status === 'cancelled' || status === 'slotCancelled' ? '' : t.noPass),
+          b.pass_name ? b.pass_name + (b.pass_unlimited ? t.unlimited : '') : (b.trial || status === 'cancelled' || status === 'slotCancelled' ? ''
+            : b.waived ? t.waived : t.noPass),
           b.trial ? t.yes : '', b.booked_by === 'admin' ? t.byAdmin : t.bySelf, b.note],
       };
     });
@@ -801,7 +803,7 @@ function createApp(cfg) {
           end: T.fromMs(T.toMs(b.start_at) + b.duration_min * 60000).slice(11),
           title: b.title, titleEn: b.title_en, category: b.category, studentId: b.student_id, name: b.name, email: b.email,
           phone: b.phone, status: st, passName: b.pass_name, passUnlimited: !!b.pass_unlimited, trial: !!b.trial,
-          noPass: !['cancelled', 'slotCancelled'].includes(st) && !b.pass_name && !b.trial,
+          noPass: !['cancelled', 'slotCancelled'].includes(st) && !b.pass_name && !b.trial && !b.waived, waived: !!b.waived,
           bookedBy: b.booked_by, note: b.note, createdAt: b.created_at, cancelledAt: b.cancelled_at,
         });
       }
@@ -813,7 +815,7 @@ function createApp(cfg) {
           kind: 'rental', id: r.id, date: r.date, start: r.start, end: r.end, rentalType: r.type, people: r.people,
           studentId: r.student_id, name: r.contact_name, email: r.student_email || '', phone: r.contact_phone,
           status: st, passName: r.pass_name, units: r.units, price: r.price, paid: !!r.paid,
-          noPass: st !== 'cancelled' && !r.pass_name && !!r.student_id,
+          noPass: st !== 'cancelled' && !r.pass_name && !!r.student_id && !r.waived, waived: !!r.waived,
           bookedBy: r.booked_by, note: r.note, createdAt: r.created_at, cancelledAt: r.cancelled_at,
         });
       }
@@ -978,7 +980,7 @@ function createApp(cfg) {
     const pid = store.createPass(Number(id), { ...input, adjust: used });
     store.logPass(pid, 'create', { name: input.name, kind: input.kind, total: input.total, unlimited: input.unlimited, end: input.endDate, used,
       purchase: input.purchaseDate });
-    return { status: 201, body: { id: pid } };
+    return { status: 201, body: { id: pid, applied: applyUnpaid(pid) } };
   });
 
   route('PUT', /^\/api\/admin\/passes\/(\d+)$/, (req, url, body, [, id]) => {
@@ -999,7 +1001,19 @@ function createApp(cfg) {
     const changes = Object.keys(before).filter((k) => String(before[k]) !== String(afterV[k]))
       .map((k) => [k, before[k], afterV[k]]);
     if (changes.length) store.logPass(p.id, 'edit', { changes });
-    return { ok: true };
+    return { ok: true, applied: applyUnpaid(p.id) };
+  });
+
+  // 付費後自動扣抵之前「未扣堂／未扣時數」的預約，並記在異動紀錄
+  function applyUnpaid(passId) {
+    const r = store.applyPassToUnpaid(passId);
+    if (r.units) store.logPass(passId, 'apply', r);
+    return r;
+  }
+  route('POST', /^\/api\/admin\/passes\/(\d+)\/apply$/, (req, url, body, [, id]) => {
+    requireAdmin(req);
+    if (!store.getPass(Number(id))) throw new HttpError(404, '找不到這張堂數卡');
+    return { applied: applyUnpaid(Number(id)), pass: publicPass(store.getPass(Number(id))) };
   });
 
   // 展延：只改到期日
@@ -1011,7 +1025,8 @@ function createApp(cfg) {
     if (body.endDate < p.start_date) throw new HttpError(400, '到期日不能早於開始日');
     store.setPassEnd(p.id, body.endDate);
     store.logPass(p.id, 'extend', { from: p.end_date, to: body.endDate, reason: str(body.reason, 100, '原因', { required: false }) });
-    return { ok: true, pass: publicPass(store.getPass(p.id)) };
+    const applied = applyUnpaid(p.id);
+    return { ok: true, applied, pass: publicPass(store.getPass(p.id)) };
   });
 
   // 快速扣 1 堂／補回 1 堂（例如學員沒預約直接來上課）
@@ -1035,7 +1050,7 @@ function createApp(cfg) {
     requireAdmin(req);
     if (!store.setPassVoided(Number(id), act === 'void')) throw new HttpError(404, '找不到這張堂數卡');
     store.logPass(Number(id), act);
-    return { ok: true };
+    return { ok: true, applied: act === 'restore' ? applyUnpaid(Number(id)) : null };
   });
 
   route('DELETE', /^\/api\/admin\/passes\/(\d+)$/, (req, url, body, [, id]) => {
@@ -1078,6 +1093,7 @@ function createApp(cfg) {
       bookings: store.studentBookings(st.id, '0000').reverse().map((b) => ({
         id: b.id, status: b.status, trial: !!b.trial, passName: b.pass_name, title: b.title, category: b.category, startAt: b.start_at,
         durationMin: b.duration_min, slotCancelled: !!b.slot_cancelled, past: b.start_at <= now(), absent: b.attendance === 'absent',
+        waived: !!b.waived,
       })),
     };
   });
@@ -1095,7 +1111,7 @@ function createApp(cfg) {
         bookings: store.slotBookings(s.id).map((b) => ({
           id: b.id, studentId: b.student_id, name: b.name, email: b.email, phone: b.phone, note: b.note,
           trial: !!b.trial, bookedBy: b.booked_by, status: b.status, createdAt: b.created_at,
-          passId: b.pass_id, passName: b.pass_name,
+          passId: b.pass_id, passName: b.pass_name, waived: !!b.waived,
           birthdayToday: !!b.birthday && b.birthday.slice(5) === s.start_at.slice(5, 10),
           healthNotes: b.health_notes, consentPhoto: b.consent_photo,
         })),

@@ -218,7 +218,8 @@
             ${b.consentPhoto === 'no' ? '<span class="badge danger" title="不同意攝影使用">📷✗ 不拍照</span>' : ''}
             ${b.healthNotes ? `<div class="health">⚠️ ${esc(b.healthNotes)}</div>` : ''}
             ${b.status === 'active' ? (b.passName ? `<div class="muted" style="font-size:.8rem">🎫 ${esc(b.passName)}</div>`
-              : b.trial ? '' : '<span class="badge danger" title="這堂沒有扣到堂數，可能需要收費">未扣堂</span>') : ''}
+              : b.trial ? '' : b.waived ? '<span class="badge">不扣堂</span>'
+              : '<span class="badge danger" title="這堂沒有扣到堂數，可能需要收費">未扣堂</span>') : ''}
             ${b.note ? `<div class="muted" style="font-size:.85rem">${esc(b.note)}</div>` : ''}</td>
           <td>${b.phone ? `<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>` : ''}
             <div class="muted" style="font-size:.8rem;word-break:break-all">${esc(b.email)}</div></td>
@@ -583,7 +584,7 @@
             : b.past ? (b.absent ? '<span class="badge danger">缺席</span>' : '<span class="badge">已上課</span>') : '<span class="badge ok">已預約</span>'}
             ${b.trial ? '<span class="badge warn">體驗</span>' : ''}
             ${b.status === 'active' && !b.slotCancelled ? (b.passName ? `<div class="muted" style="font-size:.8rem">🎫 ${esc(b.passName)}</div>`
-              : b.trial ? '' : '<span class="badge danger">未扣堂</span>') : ''}</td>
+              : b.trial ? '' : b.waived ? '<span class="badge">不扣堂</span>' : '<span class="badge danger">未扣堂</span>') : ''}</td>
         </tr>`).join('')}</tbody></table></div>` : '<div class="empty">還沒有預約紀錄</div>';
     } catch (e) { $('histBody').innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
   }
@@ -831,6 +832,9 @@
       case 'adjust': return x.delta > 0
         ? (isEn ? `Used 1 manually (now ${x.used} used)` : `手動扣 1 堂（已用 ${x.used}）`)
         : (isEn ? `Returned 1 manually (now ${x.used} used)` : `手動補回 1 堂（已用 ${x.used}）`);
+      case 'apply': return x.rentals
+        ? (isEn ? `Auto-applied to ${x.rentals} earlier unpaid rental(s) (${x.units} h)` : `自動扣抵之前未扣時數的租借 ${x.rentals} 筆（${x.units} 小時）`)
+        : (isEn ? `Auto-applied to ${x.bookings} earlier class(es) with no credit` : `自動扣抵之前未扣堂的課 ${x.bookings} 堂`);
       case 'void': return isEn ? 'Voided' : '作廢';
       case 'restore': return isEn ? 'Restored' : '恢復';
       default: return l.action;
@@ -858,9 +862,10 @@
     ev.preventDefault();
     const f = ev.target;
     try {
-      await call(`/api/admin/passes/${extending.id}/extend`, { method: 'POST', body: { endDate: f.endDate.value, reason: f.reason.value } });
+      const r = await call(`/api/admin/passes/${extending.id}/extend`, { method: 'POST', body: { endDate: f.endDate.value, reason: f.reason.value } });
       $('extDlg').close();
       toast(`已展延到 ${fmtDate(f.endDate.value)}`);
+      appliedNotice(r.applied);
       loadPasses(); loadStudents();
     } catch (e) { showError($('extErr'), e.message); }
   });
@@ -874,12 +879,20 @@
       categories: [...$('passCats').querySelectorAll('input:checked')].map((i) => i.value),
     };
     try {
-      if (editingPass) await call(`/api/admin/passes/${editingPass.id}`, { method: 'PUT', body });
-      else await call(`/api/admin/students/${passStudent.id}/passes`, { method: 'POST', body });
+      const r = editingPass ? await call(`/api/admin/passes/${editingPass.id}`, { method: 'PUT', body })
+        : await call(`/api/admin/students/${passStudent.id}/passes`, { method: 'POST', body });
       toast(editingPass ? '已儲存' : `已幫 ${passStudent.name} 開「${body.name.trim()}」${body.unlimited ? '（無限）' : `${body.total} ${unitOf(passKind)}`}`);
+      appliedNotice(r.applied);
       resetPassForm(); loadPasses(); loadStudents();
     } catch (e) { showError($('passErr'), e.message); }
   });
+
+  // 付費後自動扣抵之前未扣堂的課：提醒老師
+  function appliedNotice(a) {
+    if (!a || !a.units) return;
+    alert(a.rentals ? `💡 已自動扣抵之前「未扣時數」的場地租借 ${a.rentals} 筆，共 ${a.units} 小時。`
+      : `💡 已自動扣抵之前「未扣堂」的課 ${a.bookings} 堂。\n可以在堂數卡的「使用紀錄」看到是哪幾堂。`);
+  }
 
   // ---------- 當月壽星 ----------
   async function loadBirthdays() {
@@ -1172,7 +1185,7 @@
           ? `<b>${esc(ctitle(it))}</b>${it.trial ? ' <span class="badge warn">體驗</span>' : ''}`
           : `<span class="badge warn">🏟 場地</span> <b>${esc(RENT_LABEL[it.rentalType] || it.rentalType)}</b>${it.rentalType === 'self' ? `・${it.people} 人` : ''}`;
         const credit = it.kind === 'class'
-          ? (it.passName ? `🎫 ${esc(it.passName)}` : it.trial || it.status === 'cancelled' || it.status === 'slotCancelled' ? '' : '<span class="badge danger">未扣堂</span>')
+          ? (it.passName ? `🎫 ${esc(it.passName)}` : it.trial || it.status === 'cancelled' || it.status === 'slotCancelled' ? '' : it.waived ? '<span class="badge">不扣堂</span>' : '<span class="badge danger">未扣堂</span>')
           : (it.passName ? `🏟 ${esc(it.passName)}（${it.units} 小時）`
             : `${it.noPass ? '<span class="badge danger">未扣時數</span> ' : ''}${it.price.toLocaleString()} 元・${it.paid ? '已付款' : '<span class="badge warn">未付款</span>'}`);
         const canCancel = it.status === 'booked' || (['attended', 'absent'].includes(it.status) && it.kind === 'class');
